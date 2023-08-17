@@ -1,6 +1,5 @@
 use crate::prelude::*;
 use bevy::prelude::*;
-use std::num::Wrapping;
 use std::time::Duration;
 
 /// wipes RemovedComponents<T> queue for component T.
@@ -179,11 +178,12 @@ pub(crate) fn apply_new_snapshot_values_to_timeline_and_trigger_rollback<
         // warn!("apply_new_snapshot_values_to_timeline_and_trigger_rollback triggered");
         // if the server snapshot component has been updated, and contains a newer authoritative
         // value than what we've already applied, we might need to rollback and resim.
-        let new_snapshot_frame = (Wrapping(comp_server.values.sequence()) - Wrapping(1)).0;
-        if SequenceBuffer::<T>::sequence_less_than(
-            comp_timeline.most_recent_authoritative_frame,
-            new_snapshot_frame,
-        ) {
+        if comp_server.values.sequence() == 0 {
+            // no data yet
+            continue;
+        }
+        let new_snapshot_frame = comp_server.values.sequence() - 1;
+        if comp_timeline.most_recent_authoritative_frame < new_snapshot_frame {
             // info!("QQQ new_snapshot_frame: {new_snapshot_frame} comp-timeline.most_rec={:?}",
             //     comp_timeline.most_recent_authoritative_frame
             // );
@@ -192,7 +192,7 @@ pub(crate) fn apply_new_snapshot_values_to_timeline_and_trigger_rollback<
                 // anachronous entities need to be in the past so much load older snapshot data
                 // add 10 updates per sec, and 60fps, 3x6 = 18, so should hit an actual value
                 // otherwise we'd need to interp between or roll to nearest snapshot?
-                let target_frame = (Wrapping(new_snapshot_frame) - Wrapping(anach.frames_behind)).0;
+                let target_frame = new_snapshot_frame - anach.frames_behind;
                 if let Some(v) = comp_server.values.get(target_frame) {
                     v.clone()
                 } else {
@@ -200,7 +200,10 @@ pub(crate) fn apply_new_snapshot_values_to_timeline_and_trigger_rollback<
                     let mut f = new_snapshot_frame;
                     for _ in 1..60 {
                         error!("@ {f} = {:?}", comp_server.values.get(f));
-                        f = (Wrapping(f) - Wrapping(1)).0;
+                        if f == 0 {
+                            break;
+                        }
+                        f -= 1;
                     }
                     error!("No snapshot for target frame: {target_frame}, new_snapshot_frame: {new_snapshot_frame}");
                     continue;
@@ -239,10 +242,6 @@ pub(crate) fn record_component_removed_to_alive_ranges<T: Component + Clone + st
         }
     }
 }
-
-// TODO could have a function that removed the componenttimeline once a component is dead
-// for longer than the rollback window, since we'll never need to revive it then.
-// but in reality, we'd probably just be despawning the entity anyway.
 
 /// Runs when we detect that the [`Rollback`] resource has been added.
 /// we wind back the game_clock to the first frame of the rollback range, and set the fixed period
@@ -349,7 +348,7 @@ pub(crate) fn rollback_initiated_for_component<T: Component + Clone + std::fmt::
     mut commands: Commands,
 ) {
     let target_frame = rb.range.start;
-    let verbose = true; // std::any::type_name::<T>() == "bevy_xpbd_2d::components::Position";
+    let verbose = false; //true; // std::any::type_name::<T>() == "bevy_xpbd_2d::components::Position";
     for (entity, opt_c, ct, m_anach) in q.iter_mut() {
         let str = format!(
             "ROLLBACK {entity:?} {:?} -> {target_frame} {m_anach:?}",

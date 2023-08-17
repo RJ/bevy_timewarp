@@ -161,7 +161,7 @@ pub mod prelude {
     pub use crate::DespawnMarker;
     pub use crate::TimewarpConfig;
     pub use crate::TimewarpPlugin;
-    pub type FrameNumber = u16;
+    pub type FrameNumber = u32;
     pub use crate::TimewarpSet;
 }
 

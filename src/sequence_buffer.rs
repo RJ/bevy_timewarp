@@ -4,7 +4,6 @@ use bevy::reflect::Reflect;
 use core::fmt::Debug;
 use itertools::Itertools;
 use std::fmt;
-use std::num::Wrapping;
 
 // From: https://github.com/jaynus/reliable.io/blob/master/rust/src/sequence_buffer.rs
 // 3-clause bsd
@@ -21,8 +20,7 @@ where
 {
     entries: Vec<Option<T>>,
     entry_sequences: Vec<u32>,
-    sequence: u16,
-    // newest_seq: u16,
+    sequence: FrameNumber,
 }
 
 impl<T> Debug for SequenceBuffer<T>
@@ -59,18 +57,14 @@ where
         }
     }
 
-    // pub fn newest_sequence(&self) -> u16 {
-    //     self.newest_seq
-    // }
-
-    pub fn get(&self, sequence: u16) -> Option<&T> {
+    pub fn get(&self, sequence: FrameNumber) -> Option<&T> {
         let index = self.index(sequence);
-        if self.entry_sequences[index] != u32::from(sequence) {
+        if self.entry_sequences[index] != sequence {
             return None;
         }
         self.entries[index].as_ref()
     }
-    // pub fn get_mut(&mut self, sequence: u16) -> Option<&mut T> {
+    // pub fn get_mut(&mut self, sequence: FrameNumber) -> Option<&mut T> {
     //     let index = self.index(sequence);
 
     //     if self.entry_sequences[index] != u32::from(sequence) {
@@ -79,40 +73,38 @@ where
     //     self.entries[index].as_mut()
     // }
 
-    #[cfg_attr(feature = "cargo-clippy", allow(clippy::cast_possible_truncation))]
-    pub fn insert(&mut self, data: T, sequence: u16) -> Result<(), TimewarpError> {
-        if Self::sequence_less_than(
-            sequence,
-            (Wrapping(self.sequence) - Wrapping(self.len() as u16)).0,
-        ) {
+    // #[cfg_attr(feature = "cargo-clippy", allow(clippy::cast_possible_truncation))]
+    pub fn insert(&mut self, data: T, sequence: FrameNumber) -> Result<(), TimewarpError> {
+        if self.len() <= self.sequence as usize
+            && sequence < (self.sequence - self.len() as FrameNumber)
+        {
             return Err(TimewarpError::SequenceBufferFull);
         }
-        if Self::sequence_greater_than((Wrapping(sequence) + Wrapping(1)).0, self.sequence) {
+        if (sequence + 1) > self.sequence {
             self.remove_range(self.sequence..sequence);
 
-            self.sequence = (Wrapping(sequence) + Wrapping(1)).0;
+            self.sequence = sequence + 1;
         }
-        // self.newest_seq = Wrapping(sequence).0;
 
         let index = self.index(sequence);
 
         self.entries[index] = Some(data);
-        self.entry_sequences[index] = u32::from(sequence);
+        self.entry_sequences[index] = sequence;
 
-        self.sequence = (Wrapping(sequence) + Wrapping(1)).0;
+        self.sequence = sequence + 1;
 
         Ok(())
     }
 
     // TODO: THIS IS INCLUSIVE END
-    pub fn remove_range(&mut self, range: std::ops::Range<u16>) {
+    pub fn remove_range(&mut self, range: std::ops::Range<FrameNumber>) {
         for i in range.clone() {
             self.remove(i);
         }
         self.remove(range.end);
     }
 
-    pub fn remove(&mut self, sequence: u16) {
+    pub fn remove(&mut self, sequence: FrameNumber) {
         // TODO: validity check
         let index = self.index(sequence);
         self.entries[index] = None;
@@ -127,7 +119,7 @@ where
         }
     }
 
-    pub fn sequence(&self) -> u16 {
+    pub fn sequence(&self) -> FrameNumber {
         self.sequence
     }
 
@@ -143,31 +135,8 @@ where
         self.entries.capacity()
     }
 
-    // pub fn is_newest_greater_than(&self, s1: u16) -> bool {
-    //     Self::sequence_greater_than(self.newest_sequence(), s1)
-    // }
-
     #[inline]
-    #[cfg_attr(feature = "cargo-clippy", allow(clippy::cast_possible_truncation))]
-    fn index(&self, sequence: u16) -> usize {
-        (sequence % self.entries.len() as u16) as usize
-    }
-
-    #[inline]
-    pub fn sequence_greater_than(s1: u16, s2: u16) -> bool {
-        ((s1 > s2) && (s1 - s2 <= 32768)) || ((s1 < s2) && (s2 - s1 > 32768))
-    }
-    #[inline]
-    pub fn sequence_less_than(s1: u16, s2: u16) -> bool {
-        Self::sequence_greater_than(s2, s1)
-    }
-
-    #[inline]
-    #[cfg_attr(feature = "cargo-clippy", allow(clippy::cast_possible_truncation))]
-    pub fn check_sequence(&self, sequence: u16) -> bool {
-        Self::sequence_greater_than(
-            sequence,
-            (Wrapping(self.sequence()) - Wrapping(self.len() as u16)).0,
-        )
+    fn index(&self, sequence: FrameNumber) -> usize {
+        (sequence % self.entries.len() as FrameNumber) as usize
     }
 }
