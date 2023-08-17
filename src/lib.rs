@@ -187,7 +187,16 @@ pub(crate) enum TimewarpSetMarkers {
 
 /// Add to entity to despawn cleanly in the rollback world
 #[derive(Component, Debug, Clone, Copy, PartialEq)]
-pub struct DespawnMarker(pub FrameNumber);
+pub struct DespawnMarker(pub Option<FrameNumber>);
+
+impl DespawnMarker {
+    pub fn new() -> Self {
+        Self(None)
+    }
+    pub fn for_frame(frame: FrameNumber) -> Self {
+        Self(Some(frame))
+    }
+}
 
 pub struct TimewarpPlugin {
     config: TimewarpConfig,

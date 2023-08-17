@@ -431,15 +431,22 @@ pub(crate) fn check_for_rollback_completion(
 pub(crate) fn remove_component_after_despawn_marker_added<
     T: Component + Clone + std::fmt::Debug,
 >(
-    mut q: Query<(Entity, &mut ComponentHistory<T>), (Added<DespawnMarker>, With<T>)>,
+    mut q: Query<
+        (Entity, &mut ComponentHistory<T>, &mut DespawnMarker),
+        (Added<DespawnMarker>, With<T>),
+    >,
     mut commands: Commands,
     game_clock: Res<GameClock>,
 ) {
-    for (entity, mut ct) in q.iter_mut() {
+    for (entity, mut ct, mut despawn_marker) in q.iter_mut() {
         info!(
             "doing despawn marker component removal for {entity:?} / {:?}",
             std::any::type_name::<T>()
         );
+        // make sure despawn marker has current frame, so we know when to actually despawn
+        if despawn_marker.0.is_none() {
+            despawn_marker.0 = Some(game_clock.frame());
+        }
         ct.report_death_at_frame(game_clock.frame());
         commands.entity(entity).remove::<T>();
     }
@@ -453,7 +460,10 @@ pub(crate) fn do_actual_despawn_after_rollback_frames_from_despawn_marker(
     timewarp_config: Res<TimewarpConfig>,
 ) {
     for (entity, marker) in q.iter() {
-        if (marker.0 + timewarp_config.rollback_window) == game_clock.frame() {
+        if (marker.0.expect("Despawn marker should have a frame!")
+            + timewarp_config.rollback_window)
+            == game_clock.frame()
+        {
             info!(
                 "Doing actual despawn of {entity:?} at frame {:?}",
                 game_clock.frame()

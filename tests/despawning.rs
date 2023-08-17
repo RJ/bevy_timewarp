@@ -72,7 +72,7 @@ fn despawn_markers() {
     let despawn_frame = 4;
     app.world
         .entity_mut(e1)
-        .insert(DespawnMarker(despawn_frame));
+        .insert(DespawnMarker::for_frame(despawn_frame));
 
     tick(&mut app); // frame 4
 
@@ -149,7 +149,7 @@ fn despawn_revival_during_rollback() {
     let despawn_frame = 4;
     app.world
         .entity_mut(e1)
-        .insert(DespawnMarker(despawn_frame));
+        .insert(DespawnMarker::for_frame(despawn_frame));
 
     tick(&mut app); // frame 4
 
