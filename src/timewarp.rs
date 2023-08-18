@@ -151,7 +151,10 @@ impl TimewarpTraits for App {
             // this may end up inserting a rollback resource
             (
                 insert_components_at_prior_frames::<T>,
-                apply_new_snapshot_values_to_history_and_trigger_rollback::<T>,
+                (
+                    apply_snapshots_and_rollback_for_non_anachronous::<T>,
+                    apply_snapshots_and_snap_for_anachronous::<T>,
+                ),
             )
                 .chain()
                 .after(check_for_rollback_completion)

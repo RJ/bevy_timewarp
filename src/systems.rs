@@ -158,22 +158,20 @@ pub(crate) fn insert_components_at_prior_frames<T: Component + Clone + std::fmt:
 /// - Does it contain a snapshot newer than the last authoritative frame in the component history?
 /// - Does the snapshot value at that frame differ from the predicted values we used?
 /// - If so, copy the snapshot value to ComponentHistory and trigger a rollback to that frame.
-pub(crate) fn apply_new_snapshot_values_to_history_and_trigger_rollback<
+/// this system only concerns itself with non-Anachronous entities, meaning if we got a new
+/// serversnapshot, we can do a rollback. no funny business with holding entities in the past.
+pub(crate) fn apply_snapshots_and_rollback_for_non_anachronous<
     T: Component + Clone + std::fmt::Debug,
 >(
     mut q: Query<
-        (
-            &mut ComponentHistory<T>,
-            &ServerSnapshot<T>,
-            Option<&Anachronous>,
-        ),
-        Changed<ServerSnapshot<T>>,
+        (&mut ComponentHistory<T>, &ServerSnapshot<T>),
+        (Changed<ServerSnapshot<T>>, Without<Anachronous>),
     >,
     game_clock: Res<GameClock>,
     mut opt_rb: Option<ResMut<Rollback>>,
     mut commands: Commands,
 ) {
-    for (mut comp_history, comp_server, opt_anach) in q.iter_mut() {
+    for (mut comp_history, comp_server) in q.iter_mut() {
         // if the server snapshot component has been updated, and contains a newer authoritative
         // value than what we've already applied, we might need to rollback and resim.
         if comp_server.values.newest_frame() == 0 {
@@ -182,30 +180,7 @@ pub(crate) fn apply_new_snapshot_values_to_history_and_trigger_rollback<
         }
         let new_snapshot_frame = comp_server.values.newest_frame();
         if comp_history.most_recent_authoritative_frame < new_snapshot_frame {
-            let new_comp_val = if let Some(anach) = opt_anach {
-                debug!("ANACH COMP");
-                // anachronous entities need to be in the past so much load older snapshot data
-                // add 10 updates per sec, and 60fps, 3x6 = 18, so should hit an actual value
-                // otherwise we'd need to interp between or roll to nearest snapshot?
-                let target_frame = new_snapshot_frame - anach.frames_behind;
-                if let Some(v) = comp_server.values.get(target_frame) {
-                    v.clone()
-                } else {
-                    // search for snapshot values
-                    let mut f = new_snapshot_frame;
-                    for _ in 1..60 {
-                        error!("@ {f} = {:?}", comp_server.values.get(f));
-                        if f == 0 {
-                            break;
-                        }
-                        f -= 1;
-                    }
-                    error!("No snapshot for target frame: {target_frame}, new_snapshot_frame: {new_snapshot_frame}");
-                    continue;
-                }
-            } else {
-                comp_server.values.get(new_snapshot_frame).unwrap().clone()
-            };
+            let new_comp_val = comp_server.values.get(new_snapshot_frame).unwrap().clone();
             // copy from server snapshot to component history. in prep for rollback
             // TODO check if local predicted value matches snapshot and bypass!!
             comp_history.insert_authoritative(new_snapshot_frame, new_comp_val);
@@ -216,6 +191,67 @@ pub(crate) fn apply_new_snapshot_values_to_history_and_trigger_rollback<
             } else {
                 commands.insert_resource(Rollback::new(new_snapshot_frame, game_clock.frame()));
             }
+        }
+    }
+}
+
+/// in the case of anachronous entities, it's no use filtering on Changed<ServerSnapshot> in order
+/// to apply authoritative values to ComponentHistory
+///
+/// For example:
+///
+/// Say client game_clock.frame() is 100.
+/// We get a packet of ServerSnapshot data for frame 96
+/// Anachronous entities are running (eg) 6 frames lagged, so can't use that snapshot until
+/// frame 96 + 6 = 102.
+///
+/// Also of note - ServerSnapshots are infrequent.
+/// ie, the ServerSnapshot.values buffer is full of Nones for many frames.
+///
+/// So how do we apply snapshot data to anachronous entities correctly?
+/// Do we put the frame+frames_ahead number into a resource when we detect a Changed<ServerSnapshot>?
+///
+/// Not sure - for now, we'll just check every frame by calculating our target frame and checking
+/// if a snapshot exists, and snapping the present state to the serversnapshot value.
+///
+pub(crate) fn apply_snapshots_and_snap_for_anachronous<T: Component + Clone + std::fmt::Debug>(
+    mut q: Query<(
+        &mut T,
+        &mut ComponentHistory<T>,
+        &ServerSnapshot<T>,
+        &Anachronous,
+    )>,
+    game_clock: Res<GameClock>,
+) {
+    for (mut comp, mut comp_history, comp_server, anach) in q.iter_mut() {
+        if comp_server.values.newest_frame() == 0 {
+            // no data yet
+            continue;
+        }
+        // we are running this entity delayed, this is the frame number that we treat as current:
+        let target_frame = game_clock.frame().saturating_sub(anach.frames_behind);
+
+        if comp_history.most_recent_authoritative_frame >= target_frame {
+            continue;
+        }
+
+        // is there a snapshot value for our target_frame? if so, apply and do a rollback to it.
+        if let Some(new_comp_val) = comp_server.values.get(target_frame) {
+            trace!(
+                "f={:?} SNAPPING ANACHRONOUS for {target_frame}",
+                game_clock.frame()
+            );
+            // we are taking this new_comp_val, which originates from target_frame,
+            // and snapping the current frame values to it.
+            //
+            // hopefully we have enough player inputs to simulate correctly forward
+            //
+            comp_history.insert_authoritative(game_clock.frame(), new_comp_val.clone());
+            // we aren't doing a rollback, since we're updating the current frame:
+            *comp = new_comp_val.clone();
+        } else {
+            // No serversnapshot value for target_frame, better luck next time
+            continue;
         }
     }
 }
@@ -331,22 +367,14 @@ pub(crate) fn reremove_components_inserted_during_rollback_at_correct_frame<
 pub(crate) fn rollback_initiated_for_component<T: Component + Clone + std::fmt::Debug>(
     rb: Res<Rollback>,
     // T is None in case where component removed but ComponentHistory persists
-    mut q: Query<
-        (
-            Entity,
-            Option<&mut T>,
-            &ComponentHistory<T>,
-            Option<&Anachronous>,
-        ),
-        Without<NotRollbackable>,
-    >,
+    mut q: Query<(Entity, Option<&mut T>, &ComponentHistory<T>), Without<NotRollbackable>>,
     mut commands: Commands,
 ) {
     let target_frame = rb.range.start;
     let verbose = false; //true; // std::any::type_name::<T>() == "bevy_xpbd_2d::components::Position";
-    for (entity, opt_c, ct, m_anach) in q.iter_mut() {
+    for (entity, opt_c, ct) in q.iter_mut() {
         let str = format!(
-            "ROLLBACK {entity:?} {:?} -> {target_frame} {m_anach:?}",
+            "ROLLBACK {entity:?} {:?} -> {target_frame}",
             std::any::type_name::<T>()
         );
         if !ct.alive_at_frame(target_frame) && opt_c.is_none() {
