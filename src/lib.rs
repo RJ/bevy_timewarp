@@ -84,6 +84,7 @@
 //!         read_player_inputs,
 //!         apply_all_player_inputs_to_simulation_for_this_frame,
 //!         do_physics,
+//!         render,
 //!         etc,
 //!     )
 //!     .chain()
@@ -143,20 +144,21 @@
 //! - Developing this alongside a simple game, so this is based on what I need for my attempt at
 //!   a server-authoritative multiplayer game.
 //! - Currently requires you to use [`GameClock`] struct from this crate as frame counter.
-//! - Littered with a variety of debug logging, because not production ready(!)
+//! - Littered with a variety of debug logging, set your log level accordingly
 //! - Unoptimized: clones components each frame without checking if they've changed.
 //! - Doesn't rollback resources or other things, just (registered) component data.
 //!
 mod error;
+mod frame_buffer;
 mod game_clock;
-mod sequence_buffer;
+// mod sequence_buffer;
 pub(crate) mod systems;
 mod timewarp;
 
 pub mod prelude {
     pub use crate::error::*;
+    pub use crate::frame_buffer::*;
     pub use crate::game_clock::*;
-    pub use crate::sequence_buffer::*;
     pub use crate::timewarp::*;
     pub use crate::DespawnMarker;
     pub use crate::TimewarpConfig;
@@ -186,7 +188,7 @@ pub(crate) enum TimewarpSetMarkers {
 }
 
 /// Add to entity to despawn cleanly in the rollback world
-#[derive(Component, Debug, Clone, Copy, PartialEq)]
+#[derive(Default, Component, Debug, Clone, Copy, PartialEq)]
 pub struct DespawnMarker(pub Option<FrameNumber>);
 
 impl DespawnMarker {

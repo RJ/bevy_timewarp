@@ -9,7 +9,7 @@ pub(crate) fn clear_removed_components_queue<T: Component>(
     game_clock: Res<GameClock>,
 ) {
     if !e.is_empty() {
-        info!(
+        debug!(
             "Clearing f:{:?} RemovedComponents<{}> during rollback: {:?}",
             game_clock.frame(),
             std::any::type_name::<T>(),
@@ -21,7 +21,7 @@ pub(crate) fn clear_removed_components_queue<T: Component>(
 
 /// add the ComponentHistory<T> and ServerSnapshot<T> whenever an entity gets the T component.
 /// NB: you must have called `app.register_rollback::<T>()` for this to work.
-pub(crate) fn add_timeline_versions_of_component<T: Component + Clone + std::fmt::Debug>(
+pub(crate) fn add_timewarp_buffer_components<T: Component + Clone + std::fmt::Debug>(
     q: Query<
         (Entity, &T),
         (
@@ -43,7 +43,7 @@ pub(crate) fn add_timeline_versions_of_component<T: Component + Clone + std::fmt
         );
         comp_history.insert(game_clock.frame(), comp.clone());
 
-        info!(
+        debug!(
             "Adding ComponentHistory<> to {e:?} for {:?}\nInitial val @ {:?} = {:?}",
             std::any::type_name::<T>(),
             game_clock.frame(),
@@ -60,7 +60,7 @@ pub(crate) fn add_timeline_versions_of_component<T: Component + Clone + std::fmt
 }
 
 /// record component lifetimes
-/// won't be called first time comp is added, since it won't have a ComponentTimeline yet.
+/// won't be called first time comp is added, since it won't have a ComponentHistory yet.
 /// only for comp removed ... then readded birth
 pub(crate) fn record_component_added_to_alive_ranges<T: Component + Clone + std::fmt::Debug>(
     mut q: Query<(Entity, &mut ComponentHistory<T>), (Added<T>, Without<NotRollbackable>)>,
@@ -76,7 +76,7 @@ pub(crate) fn record_component_added_to_alive_ranges<T: Component + Clone + std:
     }
 
     for (entity, mut ct) in q.iter_mut() {
-        info!(
+        debug!(
             "{entity:?} Component birth @ {:?} {:?}",
             game_clock.frame(),
             std::any::type_name::<T>()
@@ -86,13 +86,12 @@ pub(crate) fn record_component_added_to_alive_ranges<T: Component + Clone + std:
 }
 
 /// Write current value of component to the ComponentHistory buffer for this frame
-pub(crate) fn record_local_timeline_values<T: Component + Clone + std::fmt::Debug>(
+pub(crate) fn record_component_history_values<T: Component + Clone + std::fmt::Debug>(
     mut q: Query<(Entity, &T, &mut ComponentHistory<T>)>,
     game_clock: Res<GameClock>,
 ) {
-    for (_entity, comp, mut comp_timeline) in q.iter_mut() {
-        // info!("Storing to timeline for {_entity:?} @ {:?} = {:?}", game_clock.frame(), comp);
-        comp_timeline.insert(game_clock.frame(), comp.clone());
+    for (_entity, comp, mut comp_hist) in q.iter_mut() {
+        comp_hist.insert(game_clock.frame(), comp.clone());
     }
 }
 
@@ -115,7 +114,7 @@ pub(crate) fn insert_components_at_prior_frames<T: Component + Clone + std::fmt:
     game_clock: Res<GameClock>,
 ) {
     for (entity, icaf, opt_ch, opt_ss) in q.iter_mut() {
-        warn!("{icaf:?}");
+        // warn!("{icaf:?}");
         let mut ent_cmd = commands.entity(entity);
         ent_cmd.remove::<InsertComponentAtFrame<T>>();
 
@@ -125,7 +124,7 @@ pub(crate) fn insert_components_at_prior_frames<T: Component + Clone + std::fmt:
         if let Some(mut ch) = opt_ch {
             ch.insert_authoritative(icaf.frame, icaf.component.clone());
             ch.report_birth_at_frame(icaf.frame);
-            info!("Inserting component at past frame for existing ComponentHistory");
+            debug!("Inserting component at past frame for existing ComponentHistory");
         } else {
             let mut ch = ComponentHistory::<T>::with_capacity(
                 timewarp_config.rollback_window as usize,
@@ -133,7 +132,7 @@ pub(crate) fn insert_components_at_prior_frames<T: Component + Clone + std::fmt:
             );
             ch.insert_authoritative(icaf.frame, icaf.component.clone());
             ent_cmd.insert(ch);
-            info!("Inserting component at past frame by inserting new ComponentHistory");
+            debug!("Inserting component at past frame by inserting new ComponentHistory");
         }
 
         if let Some(mut ss) = opt_ss {
@@ -159,7 +158,7 @@ pub(crate) fn insert_components_at_prior_frames<T: Component + Clone + std::fmt:
 /// - Does it contain a snapshot newer than the last authoritative frame in the component history?
 /// - Does the snapshot value at that frame differ from the predicted values we used?
 /// - If so, copy the snapshot value to ComponentHistory and trigger a rollback to that frame.
-pub(crate) fn apply_new_snapshot_values_to_timeline_and_trigger_rollback<
+pub(crate) fn apply_new_snapshot_values_to_history_and_trigger_rollback<
     T: Component + Clone + std::fmt::Debug,
 >(
     mut q: Query<
@@ -174,21 +173,17 @@ pub(crate) fn apply_new_snapshot_values_to_timeline_and_trigger_rollback<
     mut opt_rb: Option<ResMut<Rollback>>,
     mut commands: Commands,
 ) {
-    for (mut comp_timeline, comp_server, opt_anach) in q.iter_mut() {
-        // warn!("apply_new_snapshot_values_to_timeline_and_trigger_rollback triggered");
+    for (mut comp_history, comp_server, opt_anach) in q.iter_mut() {
         // if the server snapshot component has been updated, and contains a newer authoritative
         // value than what we've already applied, we might need to rollback and resim.
-        if comp_server.values.sequence() == 0 {
+        if comp_server.values.newest_frame() == 0 {
             // no data yet
             continue;
         }
-        let new_snapshot_frame = comp_server.values.sequence() - 1;
-        if comp_timeline.most_recent_authoritative_frame < new_snapshot_frame {
-            // info!("QQQ new_snapshot_frame: {new_snapshot_frame} comp-timeline.most_rec={:?}",
-            //     comp_timeline.most_recent_authoritative_frame
-            // );
+        let new_snapshot_frame = comp_server.values.newest_frame();
+        if comp_history.most_recent_authoritative_frame < new_snapshot_frame {
             let new_comp_val = if let Some(anach) = opt_anach {
-                info!("ANACH COMP");
+                debug!("ANACH COMP");
                 // anachronous entities need to be in the past so much load older snapshot data
                 // add 10 updates per sec, and 60fps, 3x6 = 18, so should hit an actual value
                 // otherwise we'd need to interp between or roll to nearest snapshot?
@@ -213,7 +208,7 @@ pub(crate) fn apply_new_snapshot_values_to_timeline_and_trigger_rollback<
             };
             // copy from server snapshot to component history. in prep for rollback
             // TODO check if local predicted value matches snapshot and bypass!!
-            comp_timeline.insert_authoritative(new_snapshot_frame, new_comp_val);
+            comp_history.insert_authoritative(new_snapshot_frame, new_comp_val);
 
             if let Some(ref mut rb) = opt_rb {
                 // this might extend an existing rollback range
@@ -233,7 +228,7 @@ pub(crate) fn record_component_removed_to_alive_ranges<T: Component + Clone + st
 ) {
     for entity in &mut removed {
         if let Ok(mut ct) = q.get_mut(entity) {
-            info!(
+            debug!(
                 "{entity:?} Component death @ {:?} {:?}",
                 game_clock.frame(),
                 std::any::type_name::<T>()
@@ -255,7 +250,7 @@ pub(crate) fn rollback_initiated(
     // save original period for restoration after rollback completion
     rb.original_period = Some(fx.period);
     rb_stats.num_rollbacks += 1;
-    info!("🛼 ROLLBACK RESOURCE ADDED ({}), reseting game clock from {:?} for {:?}, setting period -> 0 for fast fwd.", rb_stats.num_rollbacks, game_clock.frame(), rb);
+    debug!("🛼 ROLLBACK RESOURCE ADDED ({}), reseting game clock from {:?} for {:?}, setting period -> 0 for fast fwd.", rb_stats.num_rollbacks, game_clock.frame(), rb);
     // make fixed-update ticks free, ie fast-forward the simulation at max speed
     fx.period = Duration::ZERO;
     game_clock.set(rb.range.start);
@@ -335,7 +330,7 @@ pub(crate) fn reremove_components_inserted_during_rollback_at_correct_frame<
 /// or it did exist, but doesnt in the present.
 pub(crate) fn rollback_initiated_for_component<T: Component + Clone + std::fmt::Debug>(
     rb: Res<Rollback>,
-    // T is None in case where component removed but timeline persists
+    // T is None in case where component removed but ComponentHistory persists
     mut q: Query<
         (
             Entity,
@@ -362,7 +357,7 @@ pub(crate) fn rollback_initiated_for_component<T: Component + Clone + std::fmt::
         if !ct.alive_at_frame(target_frame) && opt_c.is_some() {
             // not alive then, alive now = remove the component
             if verbose {
-                info!("{str}\n- Not alive in past, but alive in pressent = remove component. alive ranges = {:?}", ct.alive_ranges);
+                trace!("{str}\n- Not alive in past, but alive in pressent = remove component. alive ranges = {:?}", ct.alive_ranges);
             }
             commands.entity(entity).remove::<T>();
             continue;
@@ -379,7 +374,7 @@ pub(crate) fn rollback_initiated_for_component<T: Component + Clone + std::fmt::
                 // }
                 if let Some(mut current_component) = opt_c {
                     if verbose {
-                        info!(
+                        trace!(
                             "{str}\n- Injecting older data by assigning, {:?} ----> {:?}",
                             Some(current_component.clone()),
                             component
@@ -388,9 +383,10 @@ pub(crate) fn rollback_initiated_for_component<T: Component + Clone + std::fmt::
                     *current_component = component.clone();
                 } else {
                     if verbose {
-                        info!(
+                        trace!(
                             "{str}\n- Injecting older data by reinserting comp, {:?} ----> {:?}",
-                            opt_c, component
+                            opt_c,
+                            component
                         );
                     }
                     commands.entity(entity).insert(component.clone());
@@ -399,7 +395,7 @@ pub(crate) fn rollback_initiated_for_component<T: Component + Clone + std::fmt::
                 // when spawning in other players sometimes this happens.
                 // they are despawned by a rollback and can't readd.
                 // maybe comps not recorded, or maybe not at correct frame or something.
-                warn!("{str}\n- Need to revive/update component, but not in timeline!");
+                warn!("{str}\n- Need to revive/update component, but not in history!");
             }
             continue;
         }
@@ -419,7 +415,7 @@ pub(crate) fn check_for_rollback_completion(
     if rb.range.contains(&game_clock.frame()) {
         return;
     }
-    info!("🛼🛼 Rollback complete. {:?}, resetting period", rb);
+    debug!("🛼🛼 Rollback complete. {:?}, resetting period", rb);
     fx.period = rb.original_period.unwrap(); // Duration::from_secs_f32(1./60.);
     commands.remove_resource::<Rollback>();
 }
@@ -439,7 +435,7 @@ pub(crate) fn remove_component_after_despawn_marker_added<
     game_clock: Res<GameClock>,
 ) {
     for (entity, mut ct, mut despawn_marker) in q.iter_mut() {
-        info!(
+        debug!(
             "doing despawn marker component removal for {entity:?} / {:?}",
             std::any::type_name::<T>()
         );
@@ -464,7 +460,7 @@ pub(crate) fn do_actual_despawn_after_rollback_frames_from_despawn_marker(
             + timewarp_config.rollback_window)
             == game_clock.frame()
         {
-            info!(
+            debug!(
                 "Doing actual despawn of {entity:?} at frame {:?}",
                 game_clock.frame()
             );

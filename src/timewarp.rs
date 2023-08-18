@@ -68,12 +68,12 @@ impl<T: Component + Clone + std::fmt::Debug> InsertComponentAtFrame<T> {
 /// Buffers the last few authoritative component values received from the server
 #[derive(Component)]
 pub struct ServerSnapshot<T: Component + Clone + std::fmt::Debug> {
-    pub values: SequenceBuffer<T>,
+    pub values: FrameBuffer<T>,
 }
 impl<T: Component + Clone + std::fmt::Debug> ServerSnapshot<T> {
     pub fn with_capacity(len: usize) -> Self {
         Self {
-            values: SequenceBuffer::<T>::with_capacity(len),
+            values: FrameBuffer::with_capacity(len),
         }
     }
     pub fn at_frame(&self, frame: FrameNumber) -> Option<&T> {
@@ -81,14 +81,14 @@ impl<T: Component + Clone + std::fmt::Debug> ServerSnapshot<T> {
     }
     pub fn insert(&mut self, frame: FrameNumber, val: T) {
         // TODO this should never be allowed to fail?
-        self.values.insert(val, frame).ok();
+        self.values.insert(frame, val);
     }
 }
 
 /// Buffers component values for the last few frames.
 #[derive(Component)]
 pub struct ComponentHistory<T: Component + Clone + std::fmt::Debug> {
-    pub values: SequenceBuffer<T>,     // not pub!
+    pub values: FrameBuffer<T>,        // not pub!
     pub alive_ranges: Vec<FrameRange>, // inclusive! unlike std:range
     pub most_recent_authoritative_frame: FrameNumber,
 }
@@ -98,7 +98,7 @@ pub struct ComponentHistory<T: Component + Clone + std::fmt::Debug> {
 impl<T: Component + Clone + std::fmt::Debug> ComponentHistory<T> {
     pub fn with_capacity(len: usize, birth_frame: FrameNumber) -> Self {
         let mut this = Self {
-            values: SequenceBuffer::<T>::with_capacity(len),
+            values: FrameBuffer::with_capacity(len),
             alive_ranges: Vec::new(),
             most_recent_authoritative_frame: birth_frame,
         };
@@ -113,8 +113,7 @@ impl<T: Component + Clone + std::fmt::Debug> ComponentHistory<T> {
         self.insert(frame, val);
     }
     pub fn insert(&mut self, frame: FrameNumber, val: T) {
-        // TODO this should never be allowed to fail?
-        self.values.insert(val, frame).ok();
+        self.values.insert(frame, val);
     }
     pub fn alive_at_frame(&self, frame: FrameNumber) -> bool {
         for (start, maybe_end) in &self.alive_ranges {
@@ -125,11 +124,11 @@ impl<T: Component + Clone + std::fmt::Debug> ComponentHistory<T> {
         false
     }
     pub fn report_birth_at_frame(&mut self, frame: FrameNumber) {
-        info!("component birth @ {frame} {:?}", std::any::type_name::<T>());
+        debug!("component birth @ {frame} {:?}", std::any::type_name::<T>());
         self.alive_ranges.push((frame, None));
     }
     pub fn report_death_at_frame(&mut self, frame: FrameNumber) {
-        info!("component death @ {frame} {:?}", std::any::type_name::<T>());
+        debug!("component death @ {frame} {:?}", std::any::type_name::<T>());
         self.alive_ranges.last_mut().unwrap().1 = Some(frame);
     }
 }
@@ -145,14 +144,14 @@ impl TimewarpTraits for App {
         // and add systems to update/apply it
         self.add_systems(
             FixedUpdate,
-            add_timeline_versions_of_component::<T>.in_set(TimewarpSet::RollbackPreUpdate),
+            add_timewarp_buffer_components::<T>.in_set(TimewarpSet::RollbackPreUpdate),
         )
         .add_systems(
             FixedUpdate,
             // this may end up inserting a rollback resource
             (
                 insert_components_at_prior_frames::<T>,
-                apply_new_snapshot_values_to_timeline_and_trigger_rollback::<T>,
+                apply_new_snapshot_values_to_history_and_trigger_rollback::<T>,
             )
                 .chain()
                 .after(check_for_rollback_completion)
@@ -186,7 +185,7 @@ impl TimewarpTraits for App {
             (
                 remove_component_after_despawn_marker_added::<T>,
                 // don't record if we are about to rollback anyway:
-                record_local_timeline_values::<T>.run_if(not(resource_added::<Rollback>())),
+                record_component_history_values::<T>.run_if(not(resource_added::<Rollback>())),
                 // only runs first frame of rollback
             )
                 .chain()
