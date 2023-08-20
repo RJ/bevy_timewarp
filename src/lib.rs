@@ -104,6 +104,21 @@
 //! );
 //! ```
 //!
+//! # Visual smoothing of errors
+//!
+//! Timewarp snaps the simulation state – ie. the value of a component at a specific frame simulated
+//! locally vs the value after rollback and resimulate might differ.
+//! If you register your components like this:
+//!
+//! ```rust,ignore
+//!     app.register_rollback_with_correction_logging::<Position>();
+//! ```
+//!
+//! then timewarp will capture the before and after versions of components when doing a rollback,
+//! and put it into a [`TimewarpCorrection`] component for your game to examine.
+//! Typically this would be useful for some visual smoothing - you might gradually blend over the
+//! error distance with your sprite, even though the underlying physical simulation snapped correct.
+//!
 //! ## Testing various edge cases
 //!
 //! TODO: I don't know how to link rustdocs to integration tests..
@@ -232,7 +247,7 @@ impl Plugin for TimewarpPlugin {
                     TimewarpSetMarkers::RollbackStartMarker,
                     TimewarpSet::RollbackPreUpdate,
                     TimewarpSet::RollbackInitiated,
-                    TimewarpSet::RollbackFooter,
+                    TimewarpSet::RollbackFooter, // empty, remove.
                     TimewarpSetMarkers::RollbackEndMarker,
                 )
                     .chain(),

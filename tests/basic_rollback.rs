@@ -174,6 +174,7 @@ fn basic_rollback() {
     let ch_e2 = app.comp_val_at::<Enemy>(e2, 5);
     assert!(ch_e2.is_some());
     assert_eq!(ch_e2.unwrap().health, 97);
+    assert_eq!(app.world.get::<Enemy>(e2).unwrap().health, 97);
 
     tick(&mut app); // frame 6
 
@@ -189,4 +190,32 @@ fn basic_rollback() {
     let ch_e2 = app.comp_val_at::<Enemy>(e2, 6);
     assert!(ch_e2.is_some());
     assert_eq!(ch_e2.unwrap().health, 96);
+
+    tick(&mut app); // frame 7
+
+    assert_eq!(app.comp_val_at::<Enemy>(e2, 7).unwrap().health, 95);
+    assert_eq!(app.world.get::<Enemy>(e2).unwrap().health, 95);
+
+    // now lets test what happens if we update the server snapshot with what we know to be identical
+    // values to the the client simulation, to represent a lovely deterministic simulation with no errors
+
+    let mut ss_e2 = app.world.get_mut::<ServerSnapshot<Enemy>>(e2).unwrap();
+    // we know from the asserts above that health of e2 was 97 at frame 5.
+    // so lets make the server confirm that:
+    ss_e2.insert(5, Enemy { health: 97 });
+
+    tick(&mut app); // frame 8, expecting another rollback
+
+    assert_eq!(
+        app.world
+            .get_resource::<RollbackStats>()
+            .unwrap()
+            .num_rollbacks,
+        2
+    );
+
+    assert_eq!(app.comp_val_at::<Enemy>(e2, 8).unwrap().health, 94);
+    assert_eq!(app.comp_val_at::<Enemy>(e2, 7).unwrap().health, 95);
+
+    assert_eq!(app.world.get::<Enemy>(e2).unwrap().health, 94);
 }

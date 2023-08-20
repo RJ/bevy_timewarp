@@ -21,7 +21,10 @@ pub(crate) fn clear_removed_components_queue<T: Component>(
 
 /// add the ComponentHistory<T> and ServerSnapshot<T> whenever an entity gets the T component.
 /// NB: you must have called `app.register_rollback::<T>()` for this to work.
-pub(crate) fn add_timewarp_buffer_components<T: Component + Clone + std::fmt::Debug>(
+pub(crate) fn add_timewarp_buffer_components<
+    T: Component + Clone + std::fmt::Debug,
+    const CORRECTION_LOGGING: bool,
+>(
     q: Query<
         (Entity, &T),
         (
@@ -41,6 +44,9 @@ pub(crate) fn add_timewarp_buffer_components<T: Component + Clone + std::fmt::De
             timewarp_config.rollback_window as usize,
             game_clock.frame(),
         );
+        if CORRECTION_LOGGING {
+            comp_history.enable_correction_logging();
+        }
         comp_history.insert(game_clock.frame(), comp.clone());
 
         debug!(
@@ -87,10 +93,48 @@ pub(crate) fn record_component_added_to_alive_ranges<T: Component + Clone + std:
 
 /// Write current value of component to the ComponentHistory buffer for this frame
 pub(crate) fn record_component_history_values<T: Component + Clone + std::fmt::Debug>(
-    mut q: Query<(Entity, &T, &mut ComponentHistory<T>)>,
+    mut q: Query<(
+        Entity,
+        &T,
+        &mut ComponentHistory<T>,
+        Option<&mut TimewarpCorrection<T>>,
+    )>,
     game_clock: Res<GameClock>,
+    mut commands: Commands,
 ) {
-    for (_entity, comp, mut comp_hist) in q.iter_mut() {
+    for (entity, comp, mut comp_hist, opt_correction) in q.iter_mut() {
+        if comp_hist.correction_logging_enabled {
+            if let Some(diff_frame) = comp_hist.diff_at_frame {
+                if diff_frame == game_clock.frame() {
+                    comp_hist.diff_at_frame = None;
+                    // we must have rolled back and resimulated forward to a frame that already has
+                    // data. before we replace what's in the comp history buffer for this frame, we
+                    // take a look at it, and compute the diff. this represents the error in our simulation.
+                    // since the change will cause the simulation to snap to the new values.
+                    let old_val = comp_hist.at_frame(diff_frame).unwrap();
+                    // need T to be PartialEq here:
+                    // if *old_val != *comp {
+                    if let Some(mut correction) = opt_correction {
+                        correction.before = old_val.clone();
+                        correction.after = comp.clone();
+                        correction.frame = diff_frame; // current frame
+                    } else {
+                        commands.entity(entity).insert(TimewarpCorrection::<T> {
+                            before: old_val.clone(),
+                            after: comp.clone(),
+                            frame: diff_frame,
+                        });
+                    }
+                    // }
+
+                    // warn!("RB-SNAP-DIFF@{diff_frame}: {old_val:?} ----> {comp:?}");
+                }
+            }
+        }
+        let verbose = false; //std::any::type_name::<T>().contains(":Rotation");
+        if verbose {
+            info!("record @ {:?} {entity:?} {comp:?}", game_clock.frame());
+        }
         comp_hist.insert(game_clock.frame(), comp.clone());
     }
 }
@@ -184,6 +228,11 @@ pub(crate) fn apply_snapshots_and_rollback_for_non_anachronous<
             // copy from server snapshot to component history. in prep for rollback
             // TODO check if local predicted value matches snapshot and bypass!!
             comp_history.insert_authoritative(new_snapshot_frame, new_comp_val);
+            // calculate error offset when we resimulate back to this frame.
+            // ie, diff between current value of T at current frame, vs current frame post-rollback+resim.
+            if comp_history.correction_logging_enabled {
+                comp_history.diff_at_frame = Some(game_clock.frame());
+            }
 
             if let Some(ref mut rb) = opt_rb {
                 // this might extend an existing rollback range
@@ -336,7 +385,7 @@ pub(crate) fn reinsert_components_removed_during_rollback_at_correct_frame<
 pub(crate) fn reremove_components_inserted_during_rollback_at_correct_frame<
     T: Component + Clone + std::fmt::Debug,
 >(
-    q: Query<(Entity, &ComponentHistory<T>), With<T>>,
+    mut q: Query<(Entity, &mut ComponentHistory<T>), With<T>>,
     game_clock: Res<GameClock>,
     mut commands: Commands,
 ) {
@@ -345,13 +394,14 @@ pub(crate) fn reremove_components_inserted_during_rollback_at_correct_frame<
         game_clock.frame(),
         std::any::type_name::<T>()
     );
-    for (entity, comp_history) in q.iter() {
+    for (entity, mut comp_history) in q.iter_mut() {
         if !comp_history.alive_at_frame(game_clock.frame()) {
-            debug!(
+            info!(
                 "Re-removing {entity:?} -> {:?} during rollback @ {:?}",
                 std::any::type_name::<T>(),
                 game_clock.frame()
             );
+            comp_history.remove_frame_and_beyond(game_clock.frame());
             commands.entity(entity).remove::<T>();
         } else {
             debug!("comp_history: {:?}", comp_history.alive_ranges);

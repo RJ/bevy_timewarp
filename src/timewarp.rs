@@ -65,6 +65,18 @@ impl<T: Component + Clone + std::fmt::Debug> InsertComponentAtFrame<T> {
     }
 }
 
+/// entities with components that were registered with error correction logging will receive
+/// one of these components, updated with before/after values when a simulation correction
+/// resulting from a rollback and resimulate causes a snap.
+/// ie, the values before and after the rollback differ.
+/// in your game, look for Changed<TimewarpCorrection<T>> and use for any visual smoothing/interp stuff.
+#[derive(Component, Debug, Clone)]
+pub struct TimewarpCorrection<T: Component + Clone + std::fmt::Debug> {
+    pub before: T,
+    pub after: T,
+    pub frame: FrameNumber,
+}
+
 /// Buffers the last few authoritative component values received from the server
 #[derive(Component)]
 pub struct ServerSnapshot<T: Component + Clone + std::fmt::Debug> {
@@ -91,6 +103,11 @@ pub struct ComponentHistory<T: Component + Clone + std::fmt::Debug> {
     pub values: FrameBuffer<T>,        // not pub!
     pub alive_ranges: Vec<FrameRange>, // inclusive! unlike std:range
     pub most_recent_authoritative_frame: FrameNumber,
+    /// when we insert at this frame, compute diff between newly inserted val and whatever already exists in the buffer.
+    /// this is for visual smoothing post-rollback.
+    /// (if the simulation is perfect the diff would be zero, but will be unavoidably non-zero when dealing with collisions between anachronous entities for example.)
+    pub diff_at_frame: Option<FrameNumber>,
+    pub correction_logging_enabled: bool,
 }
 
 // lazy first version - don't need a clone each frame if value hasn't changed!
@@ -101,9 +118,15 @@ impl<T: Component + Clone + std::fmt::Debug> ComponentHistory<T> {
             values: FrameBuffer::with_capacity(len),
             alive_ranges: Vec::new(),
             most_recent_authoritative_frame: birth_frame,
+            diff_at_frame: None,
+            correction_logging_enabled: false,
         };
         this.report_birth_at_frame(birth_frame);
         this
+    }
+    /// will compute and insert `TimewarpCorrection`s when snapping
+    pub fn enable_correction_logging(&mut self) {
+        self.correction_logging_enabled = true;
     }
     pub fn at_frame(&self, frame: FrameNumber) -> Option<&T> {
         self.values.get(frame)
@@ -114,6 +137,11 @@ impl<T: Component + Clone + std::fmt::Debug> ComponentHistory<T> {
     }
     pub fn insert(&mut self, frame: FrameNumber, val: T) {
         self.values.insert(frame, val);
+    }
+    /// removes values buffered for this frame, and greater frames.
+    pub fn remove_frame_and_beyond(&mut self, frame: FrameNumber) {
+        self.values
+            .remove_entries_newer_than(frame.saturating_sub(1));
     }
     pub fn alive_at_frame(&self, frame: FrameNumber) -> bool {
         for (start, maybe_end) in &self.alive_ranges {
@@ -133,93 +161,135 @@ impl<T: Component + Clone + std::fmt::Debug> ComponentHistory<T> {
     }
 }
 
+#[derive(PartialEq, Eq)]
+pub enum ComponentRollbackOptions {
+    Nothing = 0,
+    CorrectionLogging = 1,
+}
+
 /// trait for registering components with the rollback system.
 pub trait TimewarpTraits {
+    /// register component for rollback
     fn register_rollback<T: Component + Clone + std::fmt::Debug>(&mut self) -> &mut Self;
+    /// register component for rollback, and also update a TimewarpCorrection component when snapping
+    fn register_rollback_with_correction_logging<T: Component + Clone + std::fmt::Debug>(
+        &mut self,
+    ) -> &mut Self;
+    /// register component for rollback with additional options
+    fn register_rollback_with_options<T: Component + Clone + std::fmt::Debug>(
+        &mut self,
+        opts: ComponentRollbackOptions,
+    ) -> &mut Self;
 }
 
 impl TimewarpTraits for App {
     fn register_rollback<T: Component + Clone + std::fmt::Debug>(&mut self) -> &mut Self {
+        self.register_rollback_with_options::<T>(ComponentRollbackOptions::Nothing)
+    }
+    fn register_rollback_with_correction_logging<T: Component + Clone + std::fmt::Debug>(
+        &mut self,
+    ) -> &mut Self {
+        self.register_rollback_with_options::<T>(ComponentRollbackOptions::CorrectionLogging)
+    }
+    fn register_rollback_with_options<T: Component + Clone + std::fmt::Debug>(
+        &mut self,
+        opts: ComponentRollbackOptions,
+    ) -> &mut Self {
         // we need to insert the ComponentTimeline<T> component to log history
         // and add systems to update/apply it
-        self.add_systems(
-            FixedUpdate,
-            add_timewarp_buffer_components::<T>.in_set(TimewarpSet::RollbackPreUpdate),
-        )
-        .add_systems(
-            FixedUpdate,
-            // this may end up inserting a rollback resource
-            (
-                insert_components_at_prior_frames::<T>,
+        if opts == ComponentRollbackOptions::CorrectionLogging {
+            self.add_systems(
+                FixedUpdate,
                 (
-                    apply_snapshots_and_rollback_for_non_anachronous::<T>,
-                    apply_snapshots_and_snap_for_anachronous::<T>,
-                ),
-            )
-                .chain()
-                .after(check_for_rollback_completion)
-                .run_if(not(resource_added::<Rollback>()))
-                .in_set(TimewarpSet::RollbackPreUpdate),
-        )
-        .add_systems(
-            FixedUpdate,
-            rollback_initiated_for_component::<T>
-                .after(rollback_initiated)
-                .run_if(resource_added::<Rollback>())
-                .in_set(TimewarpSet::RollbackInitiated),
-        )
-        .add_systems(
-            FixedUpdate,
-            (
-                (
-                    reremove_components_inserted_during_rollback_at_correct_frame::<T>,
-                    reinsert_components_removed_during_rollback_at_correct_frame::<T>,
+                    add_timewarp_buffer_components::<T, true>
+                        .in_set(TimewarpSet::RollbackPreUpdate),
                 )
-                    .run_if(resource_exists::<Rollback>()),
+                    .chain(),
+            );
+        } else {
+            self.add_systems(
+                FixedUpdate,
                 (
-                    // this grants newly added despawnmarkers the current frame -
-                    // a convenience, since they are typically inserted with None via DespawnMarker::new()
-                    process_freshly_added_despawn_markers::<T>,
-                    // which is needed before this system runs to use them:
-                    do_actual_despawn_after_rollback_frames_from_despawn_marker,
+                    add_timewarp_buffer_components::<T, false>
+                        .in_set(TimewarpSet::RollbackPreUpdate),
+                )
+                    .chain(),
+            );
+        }
+        self
+            // we want to record frame values even if we're about to rollback -
+            // we need values pre-rb to diff against post-rb versions.
+            .add_systems(
+                FixedUpdate,
+                record_component_history_values::<T>
+                    .before(check_for_rollback_completion)
+                    .in_set(TimewarpSet::RollbackPreUpdate),
+            )
+            .add_systems(
+                FixedUpdate,
+                // this may end up inserting a rollback resource
+                (
+                    insert_components_at_prior_frames::<T>,
+                    (
+                        apply_snapshots_and_rollback_for_non_anachronous::<T>,
+                        apply_snapshots_and_snap_for_anachronous::<T>,
+                    ),
                 )
                     .chain()
-                    .run_if(not(resource_exists::<Rollback>())),
+                    .after(check_for_rollback_completion)
+                    .run_if(not(resource_added::<Rollback>()))
+                    .in_set(TimewarpSet::RollbackPreUpdate),
             )
-                .in_set(TimewarpSet::RollbackPreUpdate)
-                .before(check_for_rollback_completion),
-        )
-        .add_systems(
-            FixedUpdate,
-            (
-                // don't record if we are about to rollback anyway:
-                record_component_history_values::<T>.run_if(not(resource_added::<Rollback>())),
-                // only runs first frame of rollback
+            // NB after rollback_initiated, the game_clock will already be rolled back to prior frame
+            .add_systems(
+                FixedUpdate,
+                rollback_initiated_for_component::<T>
+                    .after(rollback_initiated)
+                    .run_if(resource_added::<Rollback>())
+                    .in_set(TimewarpSet::RollbackInitiated),
             )
-                .chain()
-                .in_set(TimewarpSet::RollbackFooter),
-        )
-        // don't log component added/removed if we are in a rollback frame
-        .add_systems(
-            FixedUpdate,
-            (
-                // Recording component births. this does the Added<> query, and bails if in rollback
-                // so that the Added query is refreshed.
-                record_component_added_to_alive_ranges::<T>,
-                // removed components gets cleared during rollback.
-                record_component_removed_to_alive_ranges::<T>
-                    .run_if(not(resource_exists::<Rollback>())),
-                // During rollback, we want to actively wipe the RemovedComponents queue
-                // since not relevant. Otherwise we end up processing all the removed components
-                // on the first non-rollback frame, for components that were removed and reinserted
-                // as part of the rollback process, if the rollback frame overlaps a component
-                // birth/death boundary - which is fairly common.
-                // (RemovedComponents<T> is basically like an Events<>)
-                clear_removed_components_queue::<T>.run_if(resource_exists::<Rollback>()),
+            .add_systems(
+                FixedUpdate,
+                (
+                    (
+                        reremove_components_inserted_during_rollback_at_correct_frame::<T>,
+                        reinsert_components_removed_during_rollback_at_correct_frame::<T>,
+                    )
+                        .run_if(resource_exists::<Rollback>()),
+                    (
+                        // this grants newly added despawnmarkers the current frame -
+                        // a convenience, since they are typically inserted with None via DespawnMarker::new()
+                        process_freshly_added_despawn_markers::<T>,
+                        // which is needed before this system runs to use them:
+                        do_actual_despawn_after_rollback_frames_from_despawn_marker,
+                    )
+                        .chain()
+                        .run_if(not(resource_exists::<Rollback>())),
+                )
+                    .in_set(TimewarpSet::RollbackPreUpdate)
+                    .before(check_for_rollback_completion),
             )
-                .chain()
-                .before(check_for_rollback_completion)
-                .in_set(TimewarpSet::RollbackPreUpdate),
-        )
+            // don't log component added/removed if we are in a rollback frame
+            .add_systems(
+                FixedUpdate,
+                (
+                    // Recording component births. this does the Added<> query, and bails if in rollback
+                    // so that the Added query is refreshed.
+                    record_component_added_to_alive_ranges::<T>,
+                    // removed components gets cleared during rollback.
+                    record_component_removed_to_alive_ranges::<T>
+                        .run_if(not(resource_exists::<Rollback>())),
+                    // During rollback, we want to actively wipe the RemovedComponents queue
+                    // since not relevant. Otherwise we end up processing all the removed components
+                    // on the first non-rollback frame, for components that were removed and reinserted
+                    // as part of the rollback process, if the rollback frame overlaps a component
+                    // birth/death boundary - which is fairly common.
+                    // (RemovedComponents<T> is basically like an Events<>)
+                    clear_removed_components_queue::<T>.run_if(resource_exists::<Rollback>()),
+                )
+                    .chain()
+                    .before(check_for_rollback_completion)
+                    .in_set(TimewarpSet::RollbackPreUpdate),
+            )
     }
 }

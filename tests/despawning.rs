@@ -166,7 +166,7 @@ fn despawn_revival_during_rollback() {
     let mut ss_e2 = app.world.get_mut::<ServerSnapshot<Enemy>>(e1).unwrap();
     ss_e2.insert(2, Enemy { health: 100 });
 
-    tick(&mut app); // tick 1/rollback_window until despawn
+    tick(&mut app); // frame 5 -- 1 of rollback_window until despawn
 
     assert_eq!(
         app.world
@@ -191,6 +191,10 @@ fn despawn_revival_during_rollback() {
     assert_eq!(app.comp_val_at::<Enemy>(e1, 3).unwrap().health, 99);
     assert_eq!(app.comp_val_at::<Enemy>(e1, 4).unwrap().health, 98);
 
+    assert!(
+        app.world.get::<Enemy>(e1).is_none(),
+        "Enemy component should be missing"
+    );
     assert!(app.comp_val_at::<Enemy>(e1, 5).is_none());
 
     // remaining ticks until actual despawn happens
