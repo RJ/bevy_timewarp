@@ -176,8 +176,14 @@ impl TimewarpTraits for App {
                     reinsert_components_removed_during_rollback_at_correct_frame::<T>,
                 )
                     .run_if(resource_exists::<Rollback>()),
-                // should this go before game logic?
-                do_actual_despawn_after_rollback_frames_from_despawn_marker
+                (
+                    // this grants newly added despawnmarkers the current frame -
+                    // a convenience, since they are typically inserted with None via DespawnMarker::new()
+                    process_freshly_added_despawn_markers::<T>,
+                    // which is needed before this system runs to use them:
+                    do_actual_despawn_after_rollback_frames_from_despawn_marker,
+                )
+                    .chain()
                     .run_if(not(resource_exists::<Rollback>())),
             )
                 .in_set(TimewarpSet::RollbackPreUpdate)
@@ -186,7 +192,6 @@ impl TimewarpTraits for App {
         .add_systems(
             FixedUpdate,
             (
-                remove_component_after_despawn_marker_added::<T>,
                 // don't record if we are about to rollback anyway:
                 record_component_history_values::<T>.run_if(not(resource_added::<Rollback>())),
                 // only runs first frame of rollback

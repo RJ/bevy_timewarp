@@ -235,7 +235,7 @@ pub(crate) fn apply_snapshots_and_snap_for_anachronous<T: Component + Clone + st
             continue;
         }
 
-        // is there a snapshot value for our target_frame? if so, apply and do a rollback to it.
+        // is there a snapshot value for our target_frame?
         if let Some(new_comp_val) = comp_server.values.get(target_frame) {
             trace!(
                 "f={:?} SNAPPING ANACHRONOUS for {target_frame}",
@@ -452,9 +452,7 @@ pub(crate) fn check_for_rollback_completion(
 
 /// despawn marker means remove all useful components, pending actual despawn after
 /// ROLLBACK_WINDOW frames have elapsed.
-pub(crate) fn remove_component_after_despawn_marker_added<
-    T: Component + Clone + std::fmt::Debug,
->(
+pub(crate) fn process_freshly_added_despawn_markers<T: Component + Clone + std::fmt::Debug>(
     mut q: Query<
         (Entity, &mut ComponentHistory<T>, &mut DespawnMarker),
         (Added<DespawnMarker>, With<T>),
