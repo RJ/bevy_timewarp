@@ -143,6 +143,8 @@
 //! tests how a server can add a component to an entity in the past, in this case a Shield, which
 //! prevents our enemy from taking damage.
 //!
+//! TODO describe the various other tests.
+//!
 //! ## Quick explanation of entity death in our rollback world
 //!
 //! In order to preserve the `Entity` id, removing an entity using the `DespawnMarker` in fact
@@ -179,6 +181,7 @@ pub mod prelude {
     pub use crate::TimewarpConfig;
     pub use crate::TimewarpPlugin;
     pub type FrameNumber = u32;
+    pub use crate::RollbackRequest;
     pub use crate::TimewarpSet;
 }
 
@@ -189,9 +192,11 @@ use prelude::*;
 /// after the main game logic (the set for which is provided in the plugin setup)
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TimewarpSet {
-    RollbackPreUpdate,
+    RecordComponentValues,
+    RollbackUnderwayComponents,
+    RollbackUnderwayGlobal,
     RollbackInitiated,
-    RollbackFooter,
+    NoRollback,
 }
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -237,17 +242,48 @@ impl TimewarpPlugin {
     }
 }
 
+#[derive(Event, Debug)]
+pub struct RollbackRequest(pub FrameNumber);
+
 impl Plugin for TimewarpPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(self.config)
+            // RollbackRequest events are drained manually in `consolidate_rollback_requests`
+            .init_resource::<Events<RollbackRequest>>()
             .insert_resource(RollbackStats::default())
             .configure_sets(
                 FixedUpdate,
                 (
                     TimewarpSetMarkers::RollbackStartMarker,
-                    TimewarpSet::RollbackPreUpdate,
-                    TimewarpSet::RollbackInitiated,
-                    TimewarpSet::RollbackFooter, // empty, remove.
+                    // --- APPLY_DEFERRED ---
+                    // Runs in normal frames       : Yes
+                    // Runs when rollback initiated: Yes
+                    // Runs during ongoing rollback: Yes
+                    TimewarpSet::RecordComponentValues,
+                    // --- APPLY_DEFERRED ---
+                    // Runs in normal frames       : No
+                    // Runs when rollback initiated: No
+                    // Runs during ongoing rollback: Yes
+                    TimewarpSet::RollbackUnderwayComponents
+                        .run_if(resource_exists::<Rollback>())
+                        .run_if(not(resource_added::<Rollback>())),
+                    // Runs in normal frames       : No
+                    // Runs when rollback initiated: No
+                    // Runs during ongoing rollback: Yes
+                    TimewarpSet::RollbackUnderwayGlobal
+                        .run_if(resource_exists::<Rollback>())
+                        .run_if(not(resource_added::<Rollback>())),
+                    // Runs in normal frames       : Yes
+                    // Runs when rollback initiated: No
+                    // Runs during ongoing rollback: No
+                    TimewarpSet::NoRollback // systems in here can potentially initiate a rollback.
+                        .run_if(not(resource_exists::<Rollback>()))
+                        .run_if(not(resource_added::<Rollback>())),
+                    // --- APPLY_DEFERRED ---
+                    // Runs in normal frames       : No
+                    // Runs when rollback initiated: Yes
+                    // Runs during ongoing rollback: No
+                    TimewarpSet::RollbackInitiated.run_if(resource_added::<Rollback>()),
                     TimewarpSetMarkers::RollbackEndMarker,
                 )
                     .chain(),
@@ -255,6 +291,7 @@ impl Plugin for TimewarpPlugin {
             // BoxedSystemSet implements IntoSystemSetConfig, but not IntoSystemSetConfigs
             // so for now, have to use the deprecated configure_set instead of configure_sets.
             // assume this is because bevy's API is in transitional phase in this regards..
+            // https://github.com/bevyengine/bevy/pull/9247
             .configure_set(
                 FixedUpdate,
                 self.after_set
@@ -269,37 +306,32 @@ impl Plugin for TimewarpPlugin {
                 FixedUpdate,
                 (
                     apply_deferred
-                        .before(TimewarpSet::RollbackPreUpdate)
-                        .after(TimewarpSetMarkers::RollbackStartMarker),
+                        .after(TimewarpSetMarkers::RollbackStartMarker)
+                        .before(TimewarpSet::RecordComponentValues),
                     apply_deferred
-                        .before(TimewarpSet::RollbackInitiated)
-                        .after(TimewarpSet::RollbackPreUpdate),
+                        .after(TimewarpSet::RecordComponentValues)
+                        .before(TimewarpSet::RollbackInitiated),
                     apply_deferred
-                        .before(TimewarpSet::RollbackFooter)
-                        .after(TimewarpSet::RollbackInitiated),
-                    apply_deferred
-                        .after(TimewarpSet::RollbackFooter)
-                        .before(TimewarpSetMarkers::RollbackEndMarker),
+                        .after(TimewarpSet::NoRollback)
+                        .before(TimewarpSet::RollbackInitiated),
                 ),
             )
             .add_systems(
                 FixedUpdate,
-                (
-                    // don't want to check for completion on frame it was added,
-                    // or it will insta-end
-                    systems::check_for_rollback_completion
-                        .run_if(resource_exists::<Rollback>())
-                        .run_if(not(resource_added::<Rollback>())),
-                )
-                    .chain()
-                    .in_set(TimewarpSet::RollbackPreUpdate),
+                systems::check_for_rollback_completion.in_set(TimewarpSet::RollbackUnderwayGlobal),
             )
             .add_systems(
                 FixedUpdate,
-                (systems::rollback_initiated
-                    .run_if(resource_added::<Rollback>())
-                    .in_set(TimewarpSet::RollbackInitiated))
-                .chain(),
+                systems::rollback_initiated.in_set(TimewarpSet::RollbackInitiated),
+            )
+            .add_systems(
+                FixedUpdate,
+                (
+                    systems::consolidate_rollback_requests,
+                    systems::do_actual_despawn_after_rollback_frames_from_despawn_marker,
+                )
+                    .chain()
+                    .in_set(TimewarpSet::NoRollback),
             );
     }
 }

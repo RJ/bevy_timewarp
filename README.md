@@ -86,6 +86,7 @@ app.add_systems(FixedUpdate,
         read_player_inputs,
         apply_all_player_inputs_to_simulation_for_this_frame,
         do_physics,
+        render,
         etc,
     )
     .chain()
@@ -104,6 +105,21 @@ app.add_systems(FixedUpdate,
     .run_if(resource_exists::<Rollback>()) // Rollback is happening.
 );
 ```
+
+## Visual smoothing of errors
+
+Timewarp snaps the simulation state – ie. the value of a component at a specific frame simulated
+locally vs the value after rollback and resimulate might differ.
+If you register your components like this:
+
+```rust
+    app.register_rollback_with_correction_logging::<Position>();
+```
+
+then timewarp will capture the before and after versions of components when doing a rollback,
+and put it into a [`TimewarpCorrection`] component for your game to examine.
+Typically this would be useful for some visual smoothing - you might gradually blend over the
+error distance with your sprite, even though the underlying physical simulation snapped correct.
 
 ### Testing various edge cases
 
@@ -145,7 +161,7 @@ be aware the entity id will still exist until finally despawned.
 - Developing this alongside a simple game, so this is based on what I need for my attempt at
   a server-authoritative multiplayer game.
 - Currently requires you to use [`GameClock`] struct from this crate as frame counter.
-- Littered with a variety of debug logging, because not production ready(!)
+- Littered with a variety of debug logging, set your log level accordingly
 - Unoptimized: clones components each frame without checking if they've changed.
 - Doesn't rollback resources or other things, just (registered) component data.
 

@@ -189,7 +189,10 @@ fn despawn_revival_during_rollback() {
     // because the buffered older values have changed in accordance with the ServerSnapshot:
     assert_eq!(app.comp_val_at::<Enemy>(e1, 2).unwrap().health, 100);
     assert_eq!(app.comp_val_at::<Enemy>(e1, 3).unwrap().health, 99);
-    assert_eq!(app.comp_val_at::<Enemy>(e1, 4).unwrap().health, 98);
+    assert!(
+        app.comp_val_at::<Enemy>(e1, despawn_frame).is_none(),
+        "should have been despawned"
+    );
 
     assert!(
         app.world.get::<Enemy>(e1).is_none(),

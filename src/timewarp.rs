@@ -41,11 +41,6 @@ impl Rollback {
             original_period: None,
         }
     }
-    pub fn ensure_start_covers(&mut self, start: FrameNumber) {
-        if start < self.range.start {
-            self.range.start = start;
-        }
-    }
 }
 
 /// used to record component birth/death ranges in ComponentHistory.
@@ -131,11 +126,13 @@ impl<T: Component + Clone + std::fmt::Debug> ComponentHistory<T> {
     pub fn at_frame(&self, frame: FrameNumber) -> Option<&T> {
         self.values.get(frame)
     }
-    pub fn insert_authoritative(&mut self, frame: FrameNumber, val: T) {
+    // adding entity just for debugging print outs.
+    pub fn insert_authoritative(&mut self, frame: FrameNumber, val: T, entity: &Entity) {
         self.most_recent_authoritative_frame = frame;
-        self.insert(frame, val);
+        self.insert(frame, val, entity);
     }
-    pub fn insert(&mut self, frame: FrameNumber, val: T) {
+    pub fn insert(&mut self, frame: FrameNumber, val: T, entity: &Entity) {
+        trace!("CH.Insert {entity:?} {frame} = {val:?}");
         self.values.insert(frame, val);
     }
     /// removes values buffered for this frame, and greater frames.
@@ -200,20 +197,14 @@ impl TimewarpTraits for App {
         if opts == ComponentRollbackOptions::CorrectionLogging {
             self.add_systems(
                 FixedUpdate,
-                (
-                    add_timewarp_buffer_components::<T, true>
-                        .in_set(TimewarpSet::RollbackPreUpdate),
-                )
-                    .chain(),
+                add_timewarp_buffer_components::<T, true>
+                    .in_set(TimewarpSet::RecordComponentValues),
             );
         } else {
             self.add_systems(
                 FixedUpdate,
-                (
-                    add_timewarp_buffer_components::<T, false>
-                        .in_set(TimewarpSet::RollbackPreUpdate),
-                )
-                    .chain(),
+                add_timewarp_buffer_components::<T, false>
+                    .in_set(TimewarpSet::RecordComponentValues),
             );
         }
         self
@@ -221,75 +212,42 @@ impl TimewarpTraits for App {
             // we need values pre-rb to diff against post-rb versions.
             .add_systems(
                 FixedUpdate,
-                record_component_history_values::<T>
-                    .before(check_for_rollback_completion)
-                    .in_set(TimewarpSet::RollbackPreUpdate),
+                (
+                    // Recording component births. this does the Added<> query, and bails if in rollback
+                    // so that the Added query is refreshed.
+                    record_component_added_to_alive_ranges::<T>,
+                    record_component_history_values::<T>,
+                    process_freshly_added_despawn_markers::<T>
+                        .after(record_component_history_values::<T>),
+                )
+                    .in_set(TimewarpSet::RecordComponentValues),
             )
             .add_systems(
                 FixedUpdate,
-                // this may end up inserting a rollback resource
                 (
+                    record_component_removed_to_alive_ranges::<T>,
                     insert_components_at_prior_frames::<T>,
-                    (
-                        apply_snapshots_and_rollback_for_non_anachronous::<T>,
-                        apply_snapshots_and_snap_for_anachronous::<T>,
-                    ),
+                    apply_snapshots_and_rollback_for_non_anachronous::<T>,
+                    apply_snapshots_and_snap_for_anachronous::<T>,
                 )
-                    .chain()
-                    .after(check_for_rollback_completion)
-                    .run_if(not(resource_added::<Rollback>()))
-                    .in_set(TimewarpSet::RollbackPreUpdate),
+                    .before(consolidate_rollback_requests)
+                    .in_set(TimewarpSet::NoRollback),
             )
-            // NB after rollback_initiated, the game_clock will already be rolled back to prior frame
             .add_systems(
                 FixedUpdate,
                 rollback_initiated_for_component::<T>
                     .after(rollback_initiated)
-                    .run_if(resource_added::<Rollback>())
                     .in_set(TimewarpSet::RollbackInitiated),
             )
             .add_systems(
                 FixedUpdate,
                 (
-                    (
-                        reremove_components_inserted_during_rollback_at_correct_frame::<T>,
-                        reinsert_components_removed_during_rollback_at_correct_frame::<T>,
-                    )
-                        .run_if(resource_exists::<Rollback>()),
-                    (
-                        // this grants newly added despawnmarkers the current frame -
-                        // a convenience, since they are typically inserted with None via DespawnMarker::new()
-                        process_freshly_added_despawn_markers::<T>,
-                        // which is needed before this system runs to use them:
-                        do_actual_despawn_after_rollback_frames_from_despawn_marker,
-                    )
-                        .chain()
-                        .run_if(not(resource_exists::<Rollback>())),
+                    reremove_components_inserted_during_rollback_at_correct_frame::<T>,
+                    reinsert_components_removed_during_rollback_at_correct_frame::<T>,
+                    clear_removed_components_queue::<T>
+                        .after(reremove_components_inserted_during_rollback_at_correct_frame::<T>),
                 )
-                    .in_set(TimewarpSet::RollbackPreUpdate)
-                    .before(check_for_rollback_completion),
-            )
-            // don't log component added/removed if we are in a rollback frame
-            .add_systems(
-                FixedUpdate,
-                (
-                    // Recording component births. this does the Added<> query, and bails if in rollback
-                    // so that the Added query is refreshed.
-                    record_component_added_to_alive_ranges::<T>,
-                    // removed components gets cleared during rollback.
-                    record_component_removed_to_alive_ranges::<T>
-                        .run_if(not(resource_exists::<Rollback>())),
-                    // During rollback, we want to actively wipe the RemovedComponents queue
-                    // since not relevant. Otherwise we end up processing all the removed components
-                    // on the first non-rollback frame, for components that were removed and reinserted
-                    // as part of the rollback process, if the rollback frame overlaps a component
-                    // birth/death boundary - which is fairly common.
-                    // (RemovedComponents<T> is basically like an Events<>)
-                    clear_removed_components_queue::<T>.run_if(resource_exists::<Rollback>()),
-                )
-                    .chain()
-                    .before(check_for_rollback_completion)
-                    .in_set(TimewarpSet::RollbackPreUpdate),
+                    .in_set(TimewarpSet::RollbackUnderwayComponents),
             )
     }
 }
