@@ -112,6 +112,7 @@ fn component_add_and_remove() {
 
     // health should not have reduced since shield was added at f3
     assert_eq!(app.comp_val_at::<Enemy>(e1, 5).unwrap().health, 7);
+    
     assert_eq!(
         app.comp_val_at::<Enemy>(e1, 5).unwrap().health,
         app.comp_val_at::<Enemy>(e1, 3).unwrap().health

@@ -26,6 +26,184 @@ fn log_all(game_clock: Res<GameClock>, q: Query<(Entity, &Enemy, &EntName)>) {
     }
 }
 
+/// an update arrives just for our anachronous entity
+#[test]
+fn anachronous_ss_triggers_rollback() {
+    let mut app = setup_test_app();
+
+    app.register_rollback::<Enemy>();
+
+    app.add_systems(
+        FixedUpdate,
+        (inc_frame, take_damage, log_all)
+            .chain()
+            .in_set(TimewarpTestSets::GameLogic),
+    );
+
+    let e1 = app
+        .world
+        .spawn((
+            Enemy { health: 10 },
+            EntName {
+                name: "E1".to_owned(),
+            },
+            Anachronous::new(3), // this entity is delayed by 3 frames
+        ))
+        .id();
+    tick(&mut app); // frame 1
+    tick(&mut app); // frame 2
+    tick(&mut app); // frame 3
+    tick(&mut app); // frame 4
+    tick(&mut app); // frame 5
+    tick(&mut app); // frame 6
+
+    assert_eq!(
+        app.world
+            .get_resource::<RollbackStats>()
+            .unwrap()
+            .num_rollbacks,
+        0
+    );
+
+    assert_eq!(app.world.get::<Enemy>(e1).unwrap().health, 4);
+    assert_eq!(app.comp_val_at::<Enemy>(e1, 6).unwrap().health, 4);
+
+    app.world
+        .get_mut::<ServerSnapshot<Enemy>>(e1)
+        .unwrap()
+        .insert(2, Enemy { health: 100 });
+
+    // this should trigger a rollback to frame 2 + frames_behind = 5
+    // at which point, because E1 is anachronous, it should snap in the value at frame
+    // 5 - frames_behind = 2, which is the authoritative snapshot we just inserted.
+    // then resim forward.. (in game, would be applying stored inputs too)
+
+    tick(&mut app); // frame 7, RB
+
+    assert_eq!(
+        app.world
+            .get_resource::<RollbackStats>()
+            .unwrap()
+            .num_rollbacks,
+        1
+    );
+
+    let prb = app
+        .world
+        .get_resource::<PreviousRollback>()
+        .expect("Should be a PreviousRollback");
+    assert_eq!(prb.0.range.start, 5);
+    assert_eq!(prb.0.range.end, 7);
+
+    // frames_behind is 3, so at frame 5 we load data for frame 2 (ie, the SS, health = 100)
+    // so f5 = 100, f6 = 99, f7 = 98
+    assert_eq!(app.world.get::<Enemy>(e1).unwrap().health, 98);
+    assert_eq!(app.comp_val_at::<Enemy>(e1, 7).unwrap().health, 98);
+}
+
+/// an update arrives for our anachronous entity and a non-anchronous one in same frame.
+/// this causes rollback to go more into the past than the SS frame for anach.
+#[test]
+fn anachronous_and_non_anachronous_ss_triggers_rollback() {
+    let mut app = setup_test_app();
+
+    app.register_rollback::<Enemy>();
+
+    app.add_systems(
+        FixedUpdate,
+        (inc_frame, take_damage, log_all)
+            .chain()
+            .in_set(TimewarpTestSets::GameLogic),
+    );
+
+    // an anachronous entity
+    let e1 = app
+        .world
+        .spawn((
+            Enemy { health: 10 },
+            EntName {
+                name: "E1".to_owned(),
+            },
+            Anachronous::new(3), // this entity is delayed by 3 frames
+        ))
+        .id();
+
+    // a contemporary entity
+    let e2 = app
+        .world
+        .spawn((
+            Enemy { health: 100 },
+            EntName {
+                name: "E2".to_owned(),
+            },
+        ))
+        .id();
+
+    tick(&mut app); // frame 1
+    tick(&mut app); // frame 2
+    tick(&mut app); // frame 3
+    tick(&mut app); // frame 4
+    tick(&mut app); // frame 5
+    tick(&mut app); // frame 6
+
+    assert_eq!(
+        app.world
+            .get_resource::<RollbackStats>()
+            .unwrap()
+            .num_rollbacks,
+        0
+    );
+
+    assert_eq!(app.world.get::<Enemy>(e1).unwrap().health, 4);
+    assert_eq!(app.comp_val_at::<Enemy>(e1, 6).unwrap().health, 4);
+
+    // SS is going to arrive next tick, ie frame 7.
+    // it will contain a state update for our anach entity, and for our contemporary.
+
+    // supply update to anachronous entity
+    //
+    // this should trigger a rollback to frame 5 (ie, 2 + frames_behind )
+    // at which point, because E1 is anachronous, it should snap in the value at frame
+    // 5 - frames_behind = 2, which is the authoritative snapshot we just inserted.
+    // then resim forward.. (in game, would be applying stored inputs too)
+    app.world
+        .get_mut::<ServerSnapshot<Enemy>>(e1)
+        .unwrap()
+        .insert(2, Enemy { health: 100 });
+
+    // supply update to contemporary entity
+    //
+    // this will trigger a rollback to frame 2
+    app.world
+        .get_mut::<ServerSnapshot<Enemy>>(e2)
+        .unwrap()
+        .insert(2, Enemy { health: 1000 });
+
+    // rollbacks from both events will be consolidated resulting in a rollback to frame 2.
+
+    tick(&mut app); // frame 7, RB
+
+    assert_eq!(
+        app.world
+            .get_resource::<RollbackStats>()
+            .unwrap()
+            .num_rollbacks,
+        1
+    );
+
+    let prb = app
+        .world
+        .get_resource::<PreviousRollback>()
+        .expect("Should be a PreviousRollback");
+    assert_eq!(prb.0.range.start, 2);
+    assert_eq!(prb.0.range.end, 7);
+
+    // frames_behind is 3, so at frame 5 we load data for frame 2 (ie, the SS, health = 100)
+    // so f5 = 100, f6 = 99, f7 = 98
+    assert_eq!(app.world.get::<Enemy>(e1).unwrap().health, 98);
+    assert_eq!(app.comp_val_at::<Enemy>(e1, 7).unwrap().health, 98);
+}
+
 #[test]
 fn anachronous() {
     let mut app = setup_test_app();

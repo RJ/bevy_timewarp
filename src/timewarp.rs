@@ -12,10 +12,42 @@ pub struct NotRollbackable;
 #[derive(Component, Clone, Debug)]
 pub struct Anachronous {
     pub frames_behind: FrameNumber,
+    /// frame of last server snapshot update.
+    /// used in calculation for frame lag for anachronous entities
+    newest_snapshot_frame: FrameNumber,
+    /// frame number of most recent input command for this entity
+    /// used in calculation for frame lag for anachronous entities
+    newest_input_frame: FrameNumber,
 }
 impl Anachronous {
     pub fn new(frames_behind: FrameNumber) -> Self {
-        Self { frames_behind }
+        Self {
+            frames_behind,
+            newest_snapshot_frame: 0,
+            newest_input_frame: 0,
+        }
+    }
+    pub fn newest_snapshot_frame(&self) -> FrameNumber {
+        self.newest_snapshot_frame
+    }
+    pub fn newest_input_frame(&self) -> FrameNumber {
+        self.newest_input_frame
+    }
+    pub fn set_newest_snapshot_frame(&mut self, newest_frame: FrameNumber) -> bool {
+        if newest_frame > self.newest_snapshot_frame {
+            self.newest_snapshot_frame = newest_frame;
+            true
+        } else {
+            false
+        }
+    }
+    pub fn set_newest_input_frame(&mut self, newest_frame: FrameNumber) -> bool {
+        if newest_frame > self.newest_input_frame {
+            self.newest_input_frame = newest_frame;
+            true
+        } else {
+            false
+        }
     }
 }
 
@@ -25,7 +57,7 @@ pub struct RollbackStats {
 }
 
 /// if this resource exists, we are doing a rollback. Insert it to initate one.
-#[derive(Resource, Debug)]
+#[derive(Resource, Debug, Clone)]
 pub struct Rollback {
     /// the range of frames, start being the target we rollback to
     pub range: Range<FrameNumber>,
@@ -42,6 +74,9 @@ impl Rollback {
         }
     }
 }
+
+#[derive(Resource, Debug)]
+pub struct PreviousRollback(pub Rollback);
 
 /// used to record component birth/death ranges in ComponentHistory.
 /// (start, end) – can be open-ended if end is None.
@@ -230,6 +265,7 @@ impl TimewarpTraits for App {
                     insert_components_at_prior_frames::<T>,
                     apply_snapshots_and_rollback_for_non_anachronous::<T>,
                     apply_snapshots_and_snap_for_anachronous::<T>,
+                    trigger_rollbacks_for_anachronous_entities_when_snapshots_arrive::<T>,
                 )
                     .before(consolidate_rollback_requests)
                     .in_set(TimewarpSet::NoRollback),
@@ -243,6 +279,10 @@ impl TimewarpTraits for App {
             .add_systems(
                 FixedUpdate,
                 (
+                    // we need to snap anach ss here because we might have received a SS update
+                    // containing data for anach and non anach, and had to rollback further than
+                    // the anach's target frame. During fast-forward we need to snap when we hit it.
+                    apply_snapshots_and_snap_for_anachronous::<T>,
                     reremove_components_inserted_during_rollback_at_correct_frame::<T>,
                     reinsert_components_removed_during_rollback_at_correct_frame::<T>,
                     clear_removed_components_queue::<T>

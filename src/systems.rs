@@ -249,25 +249,71 @@ pub(crate) fn apply_snapshots_and_rollback_for_non_anachronous<
     }
 }
 
-/// in the case of anachronous entities, it's no use filtering on Changed<ServerSnapshot> in order
-/// to apply authoritative values to ComponentHistory
+/// Lets say a SS arrives just for an anachronous entity. this system will
+/// rollback to the SS frame + frames_behind, so the very first frame of rollback
+/// uses the new snapshot.
 ///
-/// For example:
+/// HOWEVER. often, as well as state for anachronous entities, we get state for
+/// contemporary entities in the same packet. This state will trigger a rollback to
+/// the SS frame. ie, before we want for the anachronous one.
 ///
-/// Say client game_clock.frame() is 100.
-/// We get a packet of ServerSnapshot data for frame 96
-/// Anachronous entities are running (eg) 6 frames lagged, so can't use that snapshot until
-/// frame 96 + 6 = 102.
-///
-/// Also of note - ServerSnapshots are infrequent.
-/// ie, the ServerSnapshot.values buffer is full of Nones for many frames.
-///
-/// So how do we apply snapshot data to anachronous entities correctly?
-/// Do we put the frame+frames_ahead number into a resource when we detect a Changed<ServerSnapshot>?
-///
-/// Not sure - for now, we'll just check every frame by calculating our target frame and checking
-/// if a snapshot exists, and snapping the present state to the serversnapshot value.
-///
+/// In this (common) case, we rely on a system running during fast-forward which will
+/// snap the SS for anachronous entities.
+pub(crate) fn trigger_rollbacks_for_anachronous_entities_when_snapshots_arrive<
+    T: Component + Clone + std::fmt::Debug,
+>(
+    mut q: Query<
+        (
+            Entity,
+            &Anachronous,
+            &ServerSnapshot<T>,
+            &mut ComponentHistory<T>,
+        ),
+        Changed<ServerSnapshot<T>>,
+    >,
+    game_clock: Res<GameClock>,
+    mut rb_ev: ResMut<Events<RollbackRequest>>,
+) {
+    for (entity, anachronous, server_snapshot, mut comp_history) in q.iter_mut() {
+        let snap_frame = server_snapshot.values.newest_frame();
+        if snap_frame == 0 {
+            continue;
+        }
+        // anachronous entities are held back in the past by a calculated amount:
+        let target_frame = game_clock.frame().saturating_sub(anachronous.frames_behind);
+        // if this snapshot is ahead of where we want the entity to be, it's useless to rollback
+        if snap_frame > target_frame {
+            warn!(
+                "f={:?} {entity:?} Snap frame {snap_frame} > target_frame {target_frame} frames_behind={:?}",
+                game_clock.frame(),
+                anachronous.frames_behind,
+            );
+            continue;
+        }
+        // insert the new authoritative value into the ComponentHistory, in preparation for
+        // rolling back (which will load it, per the maths in the next comment)
+        let new_comp_val = server_snapshot
+            .values
+            .get(snap_frame)
+            .expect("snap_frame = newest_frame() so must be valid");
+        comp_history.insert_authoritative(snap_frame, new_comp_val.clone(), &entity);
+
+        // if we rollback to f = (snap_frame + frames_behind), the anachronous entity will load and apply
+        // this snapshot at f, because it deducts frames_behind before looking for snaps or inputs.
+        let rollback_frame = snap_frame + anachronous.frames_behind;
+        // trigger a rollback
+        rb_ev.send(RollbackRequest(rollback_frame));
+
+        let verbose = std::any::type_name::<T>().contains("::Position");
+        if verbose {
+            info!("🔄 f={:?} {entity:?} rolling back to {rollback_frame} because snap_frame={snap_frame} target_frame={target_frame}",
+                game_clock.frame());
+        }
+    }
+}
+
+/// for anachronous entities, if we are at a frame where a snapshot exists at the
+/// current frame - anachronous.frames_behind, we snap that value to the component.
 pub(crate) fn apply_snapshots_and_snap_for_anachronous<T: Component + Clone + std::fmt::Debug>(
     mut q: Query<(
         Entity,
@@ -278,6 +324,11 @@ pub(crate) fn apply_snapshots_and_snap_for_anachronous<T: Component + Clone + st
     )>,
     game_clock: Res<GameClock>,
 ) {
+    // info!(
+    //     "{:?} apply_snapshots_and_snap_for_anachronous {:?}",
+    //     game_clock.frame(),
+    //     std::any::type_name::<T>(),
+    // );
     for (entity, mut comp, mut comp_history, comp_server, anach) in q.iter_mut() {
         if comp_server.values.newest_frame() == 0 {
             // no data yet
@@ -286,17 +337,30 @@ pub(crate) fn apply_snapshots_and_snap_for_anachronous<T: Component + Clone + st
         // we are running this entity delayed, this is the frame number that we treat as current:
         let target_frame = game_clock.frame().saturating_sub(anach.frames_behind);
 
-        if comp_history.most_recent_authoritative_frame >= target_frame {
+        let verbose = std::any::type_name::<T>().contains("::Position");
+
+        // have we applied a more recent authoritative value to our componenthistory than our
+        // current target frame? if so, don't mess with it.
+        if comp_history.most_recent_authoritative_frame > target_frame {
+            if verbose {
+                trace!(
+                    "f={:?} noop: Position's comp_history.most_recent_authoritative_frame = {:?} target-frame = {target_frame}",
+                    game_clock.frame(),
+                    comp_history.most_recent_authoritative_frame
+                );
+            }
             continue;
         }
 
         // is there a snapshot value for our target_frame?
         if let Some(new_comp_val) = comp_server.values.get(target_frame) {
-            info!(
-                "f={:?} SNAPPING ANACHRONOUS for {:?} @ {target_frame}",
-                std::any::type_name::<T>(),
-                game_clock.frame()
-            );
+            if verbose {
+                info!(
+                    "🫰 f={:?} SNAPPING ANACHRONOUS for {:?} @ {target_frame}",
+                    game_clock.frame(),
+                    std::any::type_name::<T>(),
+                );
+            }
             // we are taking this new_comp_val, which originates from target_frame,
             // and snapping the current frame values to it.
             //
@@ -305,9 +369,15 @@ pub(crate) fn apply_snapshots_and_snap_for_anachronous<T: Component + Clone + st
             comp_history.insert_authoritative(game_clock.frame(), new_comp_val.clone(), &entity);
             // we aren't doing a rollback, since we're updating the current frame:
             *comp = new_comp_val.clone();
-        } else {
+        } else if verbose {
             // No serversnapshot value for target_frame, better luck next time
-            continue;
+            info!(
+                "f={:?} No snapshot val for {entity:?} {:?} @ target = {:?} . newest available = {:?}",
+                game_clock.frame(),
+                std::any::type_name::<T>(),
+                target_frame,
+                comp_server.values.newest_frame(),
+            );
         }
     }
 }
@@ -421,43 +491,62 @@ pub(crate) fn reremove_components_inserted_during_rollback_at_correct_frame<
 ///
 /// Also has to handle situation where the component didn't exist at the target frame
 /// or it did exist, but doesnt in the present.
+///
+/// Also, for anachronous entities, we load data from the frame less the frames_behind amount
 pub(crate) fn rollback_initiated_for_component<T: Component + Clone + std::fmt::Debug>(
     rb: Res<Rollback>,
     // T is None in case where component removed but ComponentHistory persists
-    mut q: Query<(Entity, Option<&mut T>, &ComponentHistory<T>), Without<NotRollbackable>>,
+    mut q: Query<
+        (
+            Entity,
+            Option<&mut T>,
+            &ComponentHistory<T>,
+            Option<&Anachronous>,
+        ),
+        Without<NotRollbackable>,
+    >,
     mut commands: Commands,
+    game_clock: Res<GameClock>,
 ) {
-    let target_frame = rb.range.start;
-    let verbose = false; //std::any::type_name::<T>() == "bevy_xpbd_2d::components::Position";
-    for (entity, opt_c, ct) in q.iter_mut() {
+    for (entity, opt_comp, comp_hist, opt_anach) in q.iter_mut() {
+        let verbose = opt_anach.is_some()
+            && std::any::type_name::<T>() == "bevy_xpbd_2d::components::Position";
+        // target frame is the first frame of rollback, however, for anachronous entities
+        // we must deduct the frames_behind amount to load older data for them.
+        let target_frame = rb
+            .range
+            .start
+            .saturating_sub(opt_anach.map_or(0, |anach| anach.frames_behind));
+
         let str = format!(
-            "ROLLBACK {entity:?} {:?} -> {target_frame}",
-            std::any::type_name::<T>()
+            "ROLLBACK {:?} {entity:?} -> {:?} target_frame={target_frame} {opt_anach:?}",
+            std::any::type_name::<T>(),
+            rb.range,
         );
-        if !ct.alive_at_frame(target_frame) && opt_c.is_none() {
+        if !comp_hist.alive_at_frame(target_frame) && opt_comp.is_none() {
             // info!("{str}\n(dead in present and rollback target, do nothing)");
             // not alive then, not alive now, do nothing.
             continue;
         }
-        if !ct.alive_at_frame(target_frame) && opt_c.is_some() {
+        if !comp_hist.alive_at_frame(target_frame) && opt_comp.is_some() {
             // not alive then, alive now = remove the component
             if verbose {
-                info!("{str}\n- Not alive in past, but alive in pressent = remove component. alive ranges = {:?}", ct.alive_ranges);
+                info!("{str}\n- Not alive in past, but alive in pressent = remove component. alive ranges = {:?}", comp_hist.alive_ranges);
             }
             commands.entity(entity).remove::<T>();
             continue;
         }
-        if ct.alive_at_frame(target_frame) {
+        if comp_hist.alive_at_frame(target_frame) {
             // we actually don't care if the component presently exists or not,
             // since it was alive at target-frame, we re insert with old values.
 
             // TODO greatest of target_frame and birth_frame so we don't miss respawning?
 
-            if let Some(component) = ct.at_frame(target_frame) {
+            if let Some(component) = comp_hist.at_frame(target_frame) {
                 // if std::any::type_name::<T>() == "bevy_xpbd_2d::components::PreviousPosition" {
                 //     warn!("SeqBuf dump for prevpos: {:?}", ct.values);
                 // }
-                if let Some(mut current_component) = opt_c {
+                if let Some(mut current_component) = opt_comp {
                     if verbose {
                         info!(
                             "{str}\n- Injecting older data by assigning, {:?} ----> {:?}",
@@ -470,7 +559,7 @@ pub(crate) fn rollback_initiated_for_component<T: Component + Clone + std::fmt::
                     if verbose {
                         info!(
                             "{str}\n- Injecting older data by reinserting comp, {:?} ----> {:?}",
-                            opt_c, component
+                            opt_comp, component
                         );
                     }
                     commands.entity(entity).insert(component.clone());
@@ -480,7 +569,7 @@ pub(crate) fn rollback_initiated_for_component<T: Component + Clone + std::fmt::
                 // they are despawned by a rollback and can't readd.
                 // maybe comps not recorded, or maybe not at correct frame or something.
                 warn!(
-                    "{str}\n- Need to revive/update component, but not in history @ {target_frame}"
+                    "{str}\n- Need to revive/update component, but not in history @ {target_frame}. comp_hist range: {:?}", comp_hist.values.current_range()
                 );
             }
             continue;
@@ -501,8 +590,10 @@ pub(crate) fn check_for_rollback_completion(
     if rb.range.contains(&game_clock.frame()) {
         return;
     }
+    // we keep track of the previous rollback mainly for integration tests
+    commands.insert_resource(PreviousRollback(rb.as_ref().clone()));
     debug!("🛼🛼 Rollback complete. {:?}, resetting period", rb);
-    fx.period = rb.original_period.unwrap(); // Duration::from_secs_f32(1./60.);
+    fx.period = rb.original_period.unwrap();
     commands.remove_resource::<Rollback>();
 }
 

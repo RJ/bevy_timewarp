@@ -262,23 +262,18 @@ impl Plugin for TimewarpPlugin {
                     TimewarpSet::RecordComponentValues,
                     // --- APPLY_DEFERRED ---
                     // Runs in normal frames       : No
-                    // Runs when rollback initiated: No
+                    // Runs when rollback initiated: Yes
                     // Runs during ongoing rollback: Yes
-                    TimewarpSet::RollbackUnderwayComponents
-                        .run_if(resource_exists::<Rollback>())
-                        .run_if(not(resource_added::<Rollback>())),
+                    TimewarpSet::RollbackUnderwayComponents.run_if(resource_exists::<Rollback>()),
                     // Runs in normal frames       : No
-                    // Runs when rollback initiated: No
+                    // Runs when rollback initiated: Yes
                     // Runs during ongoing rollback: Yes
-                    TimewarpSet::RollbackUnderwayGlobal
-                        .run_if(resource_exists::<Rollback>())
-                        .run_if(not(resource_added::<Rollback>())),
+                    TimewarpSet::RollbackUnderwayGlobal.run_if(resource_exists::<Rollback>()),
                     // Runs in normal frames       : Yes
                     // Runs when rollback initiated: No
                     // Runs during ongoing rollback: No
-                    TimewarpSet::NoRollback // systems in here can potentially initiate a rollback.
-                        .run_if(not(resource_exists::<Rollback>()))
-                        .run_if(not(resource_added::<Rollback>())),
+                    // systems in here can potentially initiate a rollback:
+                    TimewarpSet::NoRollback.run_if(not(resource_exists::<Rollback>())),
                     // --- APPLY_DEFERRED ---
                     // Runs in normal frames       : No
                     // Runs when rollback initiated: Yes

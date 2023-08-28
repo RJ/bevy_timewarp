@@ -6,7 +6,7 @@
 ///
 use crate::*;
 use bevy::prelude::*;
-use std::collections::VecDeque;
+use std::{collections::VecDeque, ops::Range};
 
 /// values for new frames are push_front'ed onto the vecdeque
 #[derive(Debug, Resource, Clone)]
@@ -46,6 +46,13 @@ where
             entries: VecDeque::with_capacity(len),
             capacity: len,
             front_frame: 0,
+        }
+    }
+
+    pub fn current_range(&self) -> Range<FrameNumber> {
+        Range {
+            start: self.oldest_frame(),
+            end: self.newest_frame() + 1, // end is exclusive for Ranges
         }
     }
 
@@ -117,10 +124,17 @@ where
     /// so if you insert at newest_frame() + a gazillion, you gets a buffer containing your
     /// one new value and a bunch of Nones after it.
     pub fn insert(&mut self, frame: FrameNumber, value: T) {
-        // print!("insert({frame} = {value:?})\n");
         // is this frame too old to be accepted?
         if frame < self.oldest_frame() {
-            warn!("Seqbuf old frame out of bounds, won't insert");
+            // probably outrageous lag or network desync or something? pretty bad.
+            error!(
+                "Frame too old! range: {:?} attempt: {frame} = {value:?}",
+                (
+                    self.front_frame,
+                    self.front_frame
+                        .saturating_sub(self.capacity as FrameNumber)
+                )
+            );
             return;
         }
         // are we replacing a potential existing value, ie no change in buffer range
