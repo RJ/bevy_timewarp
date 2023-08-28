@@ -292,8 +292,9 @@ pub(crate) fn apply_snapshots_and_snap_for_anachronous<T: Component + Clone + st
 
         // is there a snapshot value for our target_frame?
         if let Some(new_comp_val) = comp_server.values.get(target_frame) {
-            trace!(
-                "f={:?} SNAPPING ANACHRONOUS for {target_frame}",
+            info!(
+                "f={:?} SNAPPING ANACHRONOUS for {:?} @ {target_frame}",
+                std::any::type_name::<T>(),
                 game_clock.frame()
             );
             // we are taking this new_comp_val, which originates from target_frame,
@@ -505,25 +506,33 @@ pub(crate) fn check_for_rollback_completion(
     commands.remove_resource::<Rollback>();
 }
 
+/// despawn markers often added using DespawnMarker::new() for convenience, we fill them
+/// with the current frame here.
+pub(crate) fn add_frame_to_freshly_added_despawn_markers(
+    mut q: Query<&mut DespawnMarker, Added<DespawnMarker>>,
+    game_clock: Res<GameClock>,
+) {
+    for mut despawn_marker in q.iter_mut() {
+        if despawn_marker.0.is_none() {
+            despawn_marker.0 = Some(game_clock.frame());
+        }
+    }
+}
+
 /// despawn marker means remove all useful components, pending actual despawn after
 /// ROLLBACK_WINDOW frames have elapsed.
-pub(crate) fn process_freshly_added_despawn_markers<T: Component + Clone + std::fmt::Debug>(
-    mut q: Query<
-        (Entity, &mut ComponentHistory<T>, &mut DespawnMarker),
-        (Added<DespawnMarker>, With<T>),
-    >,
+pub(crate) fn remove_components_from_entities_with_freshly_added_despawn_markers<
+    T: Component + Clone + std::fmt::Debug,
+>(
+    mut q: Query<(Entity, &mut ComponentHistory<T>), (Added<DespawnMarker>, With<T>)>,
     mut commands: Commands,
     game_clock: Res<GameClock>,
 ) {
-    for (entity, mut ct, mut despawn_marker) in q.iter_mut() {
+    for (entity, mut ct) in q.iter_mut() {
         debug!(
             "doing despawn marker component removal for {entity:?} / {:?}",
             std::any::type_name::<T>()
         );
-        // make sure despawn marker has current frame, so we know when to actually despawn
-        if despawn_marker.0.is_none() {
-            despawn_marker.0 = Some(game_clock.frame());
-        }
         ct.report_death_at_frame(game_clock.frame());
         commands.entity(entity).remove::<T>();
     }

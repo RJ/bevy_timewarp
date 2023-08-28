@@ -318,6 +318,11 @@ impl Plugin for TimewarpPlugin {
             )
             .add_systems(
                 FixedUpdate,
+                systems::add_frame_to_freshly_added_despawn_markers
+                    .in_set(TimewarpSet::RecordComponentValues),
+            )
+            .add_systems(
+                FixedUpdate,
                 systems::check_for_rollback_completion.in_set(TimewarpSet::RollbackUnderwayGlobal),
             )
             .add_systems(

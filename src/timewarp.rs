@@ -217,8 +217,9 @@ impl TimewarpTraits for App {
                     // so that the Added query is refreshed.
                     record_component_added_to_alive_ranges::<T>,
                     record_component_history_values::<T>,
-                    process_freshly_added_despawn_markers::<T>
-                        .after(record_component_history_values::<T>),
+                    remove_components_from_entities_with_freshly_added_despawn_markers::<T>
+                        .after(record_component_history_values::<T>)
+                        .after(add_frame_to_freshly_added_despawn_markers),
                 )
                     .in_set(TimewarpSet::RecordComponentValues),
             )
