@@ -2,6 +2,13 @@ use crate::FrameNumber;
 use bevy::prelude::*;
 use std::{ops::Range, time::Duration};
 
+#[derive(Resource, Debug, Copy, Clone)]
+pub struct TimewarpConfig {
+    /// how many frames of old component values should we buffer?
+    /// can't roll back any further than this. will depend on network lag and game mechanics.
+    pub rollback_window: FrameNumber,
+}
+
 /// Updated whenever we perform a rollback
 #[derive(Resource, Debug, Default)]
 pub struct RollbackStats {
@@ -39,3 +46,16 @@ impl Rollback {
 /// This is mainly so integration tests can tell wtaf is going on :)
 #[derive(Resource, Debug)]
 pub struct PreviousRollback(pub Rollback);
+
+/// Add to entity to despawn cleanly in the rollback world
+#[derive(Default, Component, Debug, Clone, Copy, PartialEq)]
+pub struct DespawnMarker(pub Option<FrameNumber>);
+
+impl DespawnMarker {
+    pub fn new() -> Self {
+        Self(None)
+    }
+    pub fn for_frame(frame: FrameNumber) -> Self {
+        Self(Some(frame))
+    }
+}

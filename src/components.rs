@@ -6,7 +6,7 @@ use bevy::prelude::*;
 #[derive(Component)]
 pub struct NotRollbackable;
 
-/// the marker component that tells us this entity is to be rendered in the past
+/// Tells us this entity is to be rendered in the past
 /// based on snapshots received from the server.
 /// aka Predicted maybe, if we actually predict inputs into the future?
 #[derive(Component, Clone, Debug)]

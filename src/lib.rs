@@ -181,11 +181,9 @@ pub mod prelude {
     pub use crate::game_clock::*;
     pub use crate::resources::*;
     pub use crate::traits::*;
-    pub use crate::DespawnMarker;
-    pub use crate::TimewarpConfig;
     pub use crate::TimewarpPlugin;
     pub type FrameNumber = u32;
-    pub use crate::RollbackRequest;
+    pub use crate::systems::RollbackRequest;
     pub use crate::TimewarpSet;
 }
 
@@ -211,30 +209,10 @@ pub(crate) enum TimewarpSetMarkers {
     RollbackEndMarker,
 }
 
-/// Add to entity to despawn cleanly in the rollback world
-#[derive(Default, Component, Debug, Clone, Copy, PartialEq)]
-pub struct DespawnMarker(pub Option<FrameNumber>);
-
-impl DespawnMarker {
-    pub fn new() -> Self {
-        Self(None)
-    }
-    pub fn for_frame(frame: FrameNumber) -> Self {
-        Self(Some(frame))
-    }
-}
-
 pub struct TimewarpPlugin {
     config: TimewarpConfig,
     /// set containing game logic, after which the rollback systems will run
     after_set: BoxedSystemSet,
-}
-
-#[derive(Resource, Debug, Copy, Clone)]
-pub struct TimewarpConfig {
-    /// how many frames of old component values should we buffer?
-    /// can't roll back any further than this. will depend on network lag and game mechanics.
-    pub rollback_window: FrameNumber,
 }
 
 impl TimewarpPlugin {
@@ -245,9 +223,6 @@ impl TimewarpPlugin {
         }
     }
 }
-
-#[derive(Event, Debug)]
-pub struct RollbackRequest(pub FrameNumber);
 
 impl Plugin for TimewarpPlugin {
     fn build(&self, app: &mut App) {

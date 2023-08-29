@@ -2,6 +2,11 @@ use crate::prelude::*;
 use bevy::prelude::*;
 use std::time::Duration;
 
+/// systems that want to initiate a rollback write one of these to
+/// the Events<RollbackRequest> queue.
+#[derive(Event, Debug)]
+pub struct RollbackRequest(pub FrameNumber);
+
 /// potentially-concurrent systems request rollbacks by writing a request
 /// to the Events<RollbackRequest>, which we drain and use the smallest
 /// frame that was requested - ie, covering all requested frames.
@@ -265,7 +270,7 @@ pub(crate) fn trigger_rollback_when_snapshot_added<T: Component + Clone + std::f
 
         comp_hist.insert(rollback_frame, comp.clone(), &entity);
 
-        info!("f={:?} SNAPPING and Triggering rollback due to snapshot. {entity:?} {opt_anach:?} snap_frame: {snap_frame} target_frame {target_frame} rollback_frame {rollback_frame}", game_clock.frame());
+        debug!("f={:?} SNAPPING and Triggering rollback due to snapshot. {entity:?} {opt_anach:?} snap_frame: {snap_frame} target_frame {target_frame} rollback_frame {rollback_frame}", game_clock.frame());
 
         if comp_hist.correction_logging_enabled {
             comp_hist.diff_at_frame = Some(game_clock.frame());
@@ -304,7 +309,7 @@ pub(crate) fn apply_snapshot_to_component_if_available<T: Component + Clone + st
             .frame()
             .saturating_sub(opt_anach.map_or(0, |anach| anach.frames_behind));
 
-        let verbose = true; // std::any::type_name::<T>().contains("::Position");
+        let verbose = false; // std::any::type_name::<T>().contains("::Position");
 
         // is there a snapshot value for our target_frame?
         if let Some(new_comp_val) = comp_server.values.get(target_frame) {
@@ -444,14 +449,14 @@ pub(crate) fn rollback_component<T: Component + Clone + std::fmt::Debug>(
     game_clock: Res<GameClock>,
 ) {
     for (entity, opt_comp, comp_hist, opt_anach) in q.iter_mut() {
-        let verbose = opt_anach.is_some();
-        // && std::any::type_name::<T>() == "bevy_xpbd_2d::components::Position";
-        // target frame is the first frame of rollback, however, for anachronous entities
-        // we must deduct the frames_behind amount to load older data for them.
-        // let target_frame = rb
-        //     .range
-        //     .start
-        //     .saturating_sub(opt_anach.map_or(0, |anach| anach.frames_behind));
+        let verbose = false; // opt_anach.is_some();
+                             // && std::any::type_name::<T>() == "bevy_xpbd_2d::components::Position";
+                             // target frame is the first frame of rollback, however, for anachronous entities
+                             // we must deduct the frames_behind amount to load older data for them.
+                             // let target_frame = rb
+                             //     .range
+                             //     .start
+                             //     .saturating_sub(opt_anach.map_or(0, |anach| anach.frames_behind));
 
         let target_frame = rb.range.start;
 
