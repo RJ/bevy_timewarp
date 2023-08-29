@@ -82,6 +82,8 @@ fn error_correction() {
 
     tick(&mut app); // frame 5, we expect a rollback
 
+    // TODO i've broken TimewarpCorrections because i've changed around how we trigger rollbacks
+    //  need to add that back in to various places / review.
     assert!(app.world.get::<TimewarpCorrection<Enemy>>(e1).is_some());
 
     assert_eq!(

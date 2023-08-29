@@ -252,6 +252,7 @@ impl TimewarpTraits for App {
                     // so that the Added query is refreshed.
                     record_component_added_to_alive_ranges::<T>,
                     record_component_history_values::<T>,
+                    insert_components_at_prior_frames::<T>,
                     remove_components_from_entities_with_freshly_added_despawn_markers::<T>
                         .after(record_component_history_values::<T>)
                         .after(add_frame_to_freshly_added_despawn_markers),
@@ -262,10 +263,8 @@ impl TimewarpTraits for App {
                 FixedUpdate,
                 (
                     record_component_removed_to_alive_ranges::<T>,
-                    insert_components_at_prior_frames::<T>,
-                    apply_snapshots_and_rollback_for_non_anachronous::<T>,
-                    apply_snapshots_and_snap_for_anachronous::<T>,
-                    trigger_rollbacks_for_anachronous_entities_when_snapshots_arrive::<T>,
+                    apply_snapshot_to_component_if_available::<T>,
+                    trigger_rollback_when_snapshot_added::<T>,
                 )
                     .before(consolidate_rollback_requests)
                     .in_set(TimewarpSet::NoRollback),
@@ -279,10 +278,7 @@ impl TimewarpTraits for App {
             .add_systems(
                 FixedUpdate,
                 (
-                    // we need to snap anach ss here because we might have received a SS update
-                    // containing data for anach and non anach, and had to rollback further than
-                    // the anach's target frame. During fast-forward we need to snap when we hit it.
-                    apply_snapshots_and_snap_for_anachronous::<T>,
+                    apply_snapshot_to_component_if_available::<T>,
                     reremove_components_inserted_during_rollback_at_correct_frame::<T>,
                     reinsert_components_removed_during_rollback_at_correct_frame::<T>,
                     clear_removed_components_queue::<T>

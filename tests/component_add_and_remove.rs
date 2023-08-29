@@ -91,7 +91,8 @@ fn component_add_and_remove() {
     let historical_component = InsertComponentAtFrame::new(shield_added_frame, shield_comp);
     app.world.entity_mut(e1).insert(historical_component);
 
-    tick(&mut app); // frame 5
+    tick(&mut app); // frame 5 RB
+
     assert_eq!(
         app.world
             .get_resource::<RollbackStats>()
@@ -101,7 +102,7 @@ fn component_add_and_remove() {
     );
 
     // frame 5 should run normally, then rollback systems will run, effect a rollback,
-    // and resimulate from f2
+    // and resimulate from 3 (shield_addded_frame)
     assert_eq!(
         app.world
             .get_resource::<RollbackStats>()
@@ -110,15 +111,19 @@ fn component_add_and_remove() {
         1
     );
 
+    let prb = app.world.get_resource::<PreviousRollback>().unwrap();
+    assert_eq!(prb.0.range.start, 3);
+
     // health should not have reduced since shield was added at f3
     assert_eq!(app.comp_val_at::<Enemy>(e1, 5).unwrap().health, 7);
-    
+
     assert_eq!(
         app.comp_val_at::<Enemy>(e1, 5).unwrap().health,
         app.comp_val_at::<Enemy>(e1, 3).unwrap().health
     );
 
     tick(&mut app); // frame 6
+
     assert_eq!(app.comp_val_at::<Enemy>(e1, 6).unwrap().health, 7);
     assert_eq!(app.world.get::<Enemy>(e1).unwrap().health, 7);
 

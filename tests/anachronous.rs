@@ -91,7 +91,7 @@ fn anachronous_ss_triggers_rollback() {
     let prb = app
         .world
         .get_resource::<PreviousRollback>()
-        .expect("Should be a PreviousRollback");
+        .expect("Should be a PreviousRollback ");
     assert_eq!(prb.0.range.start, 5);
     assert_eq!(prb.0.range.end, 7);
 
