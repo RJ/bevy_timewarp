@@ -245,46 +245,62 @@ impl TimewarpTraits for App {
         self
             // we want to record frame values even if we're about to rollback -
             // we need values pre-rb to diff against post-rb versions.
+            // ---
+            // TimewarpSet::RecordComponentValues
+            // * Runs always
+            // ---
             .add_systems(
                 FixedUpdate,
                 (
                     // Recording component births. this does the Added<> query, and bails if in rollback
                     // so that the Added query is refreshed.
-                    record_component_added_to_alive_ranges::<T>,
-                    record_component_history_values::<T>,
+                    record_component_birth::<T>,
+                    record_component_history::<T>,
                     insert_components_at_prior_frames::<T>,
-                    remove_components_from_entities_with_freshly_added_despawn_markers::<T>
-                        .after(record_component_history_values::<T>)
+                    remove_components_from_despawning_entities::<T>
+                        .after(record_component_history::<T>)
                         .after(add_frame_to_freshly_added_despawn_markers),
                 )
                     .in_set(TimewarpSet::RecordComponentValues),
             )
+            // ---
+            // TimewarpSet::RollbackUnderwayComponents
+            // * run_if(resource_exists(Rollback))
+            // ---
             .add_systems(
                 FixedUpdate,
                 (
-                    record_component_removed_to_alive_ranges::<T>,
+                    apply_snapshot_to_component_if_available::<T>,
+                    rekill_components_during_rollback::<T>,
+                    rebirth_components_during_rollback::<T>,
+                    clear_removed_components_queue::<T>
+                        .after(rekill_components_during_rollback::<T>),
+                )
+                    .in_set(TimewarpSet::RollbackUnderwayComponents),
+            )
+            // ---
+            // TimewarpSet::RollbackInitiated
+            // * run_if(resource_added(Rollback))
+            // ---
+            .add_systems(
+                FixedUpdate,
+                rollback_component::<T>
+                    .after(rollback_initiated)
+                    .in_set(TimewarpSet::RollbackInitiated),
+            )
+            // ---
+            // TimewarpSet::NoRollback
+            // * run_if(not(resource_exists(Rollback)))
+            // ---
+            .add_systems(
+                FixedUpdate,
+                (
+                    record_component_death::<T>,
                     apply_snapshot_to_component_if_available::<T>,
                     trigger_rollback_when_snapshot_added::<T>,
                 )
                     .before(consolidate_rollback_requests)
                     .in_set(TimewarpSet::NoRollback),
-            )
-            .add_systems(
-                FixedUpdate,
-                rollback_initiated_for_component::<T>
-                    .after(rollback_initiated)
-                    .in_set(TimewarpSet::RollbackInitiated),
-            )
-            .add_systems(
-                FixedUpdate,
-                (
-                    apply_snapshot_to_component_if_available::<T>,
-                    reremove_components_inserted_during_rollback_at_correct_frame::<T>,
-                    reinsert_components_removed_during_rollback_at_correct_frame::<T>,
-                    clear_removed_components_queue::<T>
-                        .after(reremove_components_inserted_during_rollback_at_correct_frame::<T>),
-                )
-                    .in_set(TimewarpSet::RollbackUnderwayComponents),
             )
     }
 }

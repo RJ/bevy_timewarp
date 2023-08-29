@@ -89,7 +89,7 @@ pub(crate) fn add_timewarp_buffer_components<
 /// record component lifetimes
 /// won't be called first time comp is added, since it won't have a ComponentHistory yet.
 /// only for comp removed ... then readded birth
-pub(crate) fn record_component_added_to_alive_ranges<T: Component + Clone + std::fmt::Debug>(
+pub(crate) fn record_component_birth<T: Component + Clone + std::fmt::Debug>(
     mut q: Query<(Entity, &mut ComponentHistory<T>), (Added<T>, Without<NotRollbackable>)>,
     game_clock: Res<GameClock>,
     rb: Option<Res<Rollback>>,
@@ -113,7 +113,7 @@ pub(crate) fn record_component_added_to_alive_ranges<T: Component + Clone + std:
 }
 
 /// Write current value of component to the ComponentHistory buffer for this frame
-pub(crate) fn record_component_history_values<T: Component + Clone + std::fmt::Debug>(
+pub(crate) fn record_component_history<T: Component + Clone + std::fmt::Debug>(
     mut q: Query<(
         Entity,
         &T,
@@ -124,14 +124,22 @@ pub(crate) fn record_component_history_values<T: Component + Clone + std::fmt::D
     mut commands: Commands,
 ) {
     for (entity, comp, mut comp_hist, opt_correction) in q.iter_mut() {
+        // this is where we generate a TimewarpCorrection if needed.
+        //
+        // If ComponentHistory.diff_at_frame matches the current frame, we must have rolled back
+        // and resimulated forward to a frame that already has data.
+        //
+        // Before we replace what's in the comp history buffer for this frame, we
+        // take a look at it, and compute the diff. this represents the error in our simulation.
+        // since the change will cause the simulation to snap to the new values.
+        //
+        // TODO `T` isn't PartialEq at the mo, if it was, we could check if old_val == new_val
+        //       and skip creating a correction. Presently the game has to do this.
         if comp_hist.correction_logging_enabled {
             if let Some(diff_frame) = comp_hist.diff_at_frame {
                 if diff_frame == game_clock.frame() {
                     comp_hist.diff_at_frame = None;
-                    // we must have rolled back and resimulated forward to a frame that already has
-                    // data. before we replace what's in the comp history buffer for this frame, we
-                    // take a look at it, and compute the diff. this represents the error in our simulation.
-                    // since the change will cause the simulation to snap to the new values.
+
                     let old_val = comp_hist.at_frame(diff_frame).unwrap();
                     // need T to be PartialEq here:
                     // if *old_val != *comp {
@@ -151,6 +159,7 @@ pub(crate) fn record_component_history_values<T: Component + Clone + std::fmt::D
             }
         }
         trace!("record @ {:?} {entity:?} {comp:?}", game_clock.frame());
+        // the main point of this system is just to save the component value to the buffer:
         comp_hist.insert(game_clock.frame(), comp.clone(), &entity);
     }
 }
@@ -193,14 +202,13 @@ pub(crate) fn insert_components_at_prior_frames<T: Component + Clone + std::fmt:
             ent_cmd.insert(ch);
             trace!("Inserting component at past frame by inserting new ComponentHistory");
         }
-
+        // reminder: inserting a new ServerSnapshot, or adding a value to an existing ServerSnapshot
+        // will cause a rollback, per the `trigger_rollback_when_snapshot_added` system
         if let Some(mut ss) = opt_ss {
-            // don't trigger a rollback manually here:
-            // the trigger_rollback_when_snapshot_added sys will do it.
-            info!("inserting into existing SS");
+            // Entity already has a ServerSnapshot component, add our new data
             ss.insert(icaf.frame, icaf.component.clone());
         } else {
-            info!("inserting NEW SS");
+            // Add a new ServerSnapshot component to the entity
             let mut ss =
                 ServerSnapshot::<T>::with_capacity(timewarp_config.rollback_window as usize * 60); // TODO yuk
             ss.insert(icaf.frame, icaf.component.clone());
@@ -276,7 +284,6 @@ pub(crate) fn trigger_rollback_when_snapshot_added<T: Component + Clone + std::f
 /// if we are at a frame where a snapshot exists, apply the SS value to the component.
 /// for anachronous entities this will be current frame - frames_behind.
 /// otherwise we just check for snapshot at current frame.
-///
 pub(crate) fn apply_snapshot_to_component_if_available<T: Component + Clone + std::fmt::Debug>(
     mut q: Query<(
         Entity,
@@ -317,7 +324,7 @@ pub(crate) fn apply_snapshot_to_component_if_available<T: Component + Clone + st
 }
 
 /// when components are removed, we log the death frame
-pub(crate) fn record_component_removed_to_alive_ranges<T: Component + Clone + std::fmt::Debug>(
+pub(crate) fn record_component_death<T: Component + Clone + std::fmt::Debug>(
     mut removed: RemovedComponents<T>,
     mut q: Query<&mut ComponentHistory<T>>,
     game_clock: Res<GameClock>,
@@ -353,9 +360,7 @@ pub(crate) fn rollback_initiated(
 }
 
 /// during rollback, need to re-insert components that were removed, based on stored lifetimes.
-pub(crate) fn reinsert_components_removed_during_rollback_at_correct_frame<
-    T: Component + Clone + std::fmt::Debug,
->(
+pub(crate) fn rebirth_components_during_rollback<T: Component + Clone + std::fmt::Debug>(
     q: Query<(Entity, &ComponentHistory<T>), Without<T>>,
     game_clock: Res<GameClock>,
     mut commands: Commands,
@@ -393,18 +398,11 @@ pub(crate) fn reinsert_components_removed_during_rollback_at_correct_frame<
 }
 
 // during rollback, need to re-remove components that were inserted, based on stored lifetimes.
-pub(crate) fn reremove_components_inserted_during_rollback_at_correct_frame<
-    T: Component + Clone + std::fmt::Debug,
->(
+pub(crate) fn rekill_components_during_rollback<T: Component + Clone + std::fmt::Debug>(
     mut q: Query<(Entity, &mut ComponentHistory<T>), With<T>>,
     game_clock: Res<GameClock>,
     mut commands: Commands,
 ) {
-    // info!(
-    //     "reremove_components_inserted_during_rollback_at_correct_frame {:?} {:?}",
-    //     game_clock.frame(),
-    //     std::any::type_name::<T>()
-    // );
     for (entity, mut comp_history) in q.iter_mut() {
         if !comp_history.alive_at_frame(game_clock.frame()) {
             trace!(
@@ -414,8 +412,6 @@ pub(crate) fn reremove_components_inserted_during_rollback_at_correct_frame<
             );
             comp_history.remove_frame_and_beyond(game_clock.frame());
             commands.entity(entity).remove::<T>();
-        } else {
-            trace!("comp_history: {:?}", comp_history.alive_ranges);
         }
     }
 }
@@ -429,11 +425,10 @@ pub(crate) fn reremove_components_inserted_during_rollback_at_correct_frame<
 /// For anachronous entities, the ComponentHistory will already have been fiddled, so
 /// we don't do any frames_behind deduction here. That is already accounted for.
 ///
-/// Also note becaues `rollback_initiated` has already run, the game clock is set to the first
-/// rollback frame. So really all we are doing is syncing the actual Compoennts with the old values
-/// from ComponentHistory.
-///
-pub(crate) fn rollback_initiated_for_component<T: Component + Clone + std::fmt::Debug>(
+/// Also note because `rollback_initiated` has already run, the game clock is set to the first
+/// rollback frame. So really all we are doing is syncing the actual Components with the values
+/// from ComponentHistory at the "current" frame.
+pub(crate) fn rollback_component<T: Component + Clone + std::fmt::Debug>(
     rb: Res<Rollback>,
     // T is None in case where component removed but ComponentHistory persists
     mut q: Query<
@@ -548,9 +543,7 @@ pub(crate) fn add_frame_to_freshly_added_despawn_markers(
 
 /// despawn marker means remove all useful components, pending actual despawn after
 /// ROLLBACK_WINDOW frames have elapsed.
-pub(crate) fn remove_components_from_entities_with_freshly_added_despawn_markers<
-    T: Component + Clone + std::fmt::Debug,
->(
+pub(crate) fn remove_components_from_despawning_entities<T: Component + Clone + std::fmt::Debug>(
     mut q: Query<(Entity, &mut ComponentHistory<T>), (Added<DespawnMarker>, With<T>)>,
     mut commands: Commands,
     game_clock: Res<GameClock>,
@@ -566,7 +559,7 @@ pub(crate) fn remove_components_from_entities_with_freshly_added_despawn_markers
 }
 
 /// Once a [`DespawnMarker`] has been around for `rollback_frames`, do the actual despawn.
-pub(crate) fn do_actual_despawn_after_rollback_frames_from_despawn_marker(
+pub(crate) fn despawn_entities_with_elapsed_despawn_marker(
     q: Query<(Entity, &DespawnMarker)>,
     mut commands: Commands,
     game_clock: Res<GameClock>,

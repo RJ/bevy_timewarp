@@ -328,7 +328,7 @@ impl Plugin for TimewarpPlugin {
                 FixedUpdate,
                 (
                     systems::consolidate_rollback_requests,
-                    systems::do_actual_despawn_after_rollback_frames_from_despawn_marker,
+                    systems::despawn_entities_with_elapsed_despawn_marker,
                 )
                     .chain()
                     .in_set(TimewarpSet::NoRollback),
