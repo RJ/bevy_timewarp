@@ -3,36 +3,41 @@ use bevy::prelude::*;
 
 use super::*;
 
+/// This is an empty trait, used as a trait alias to make things more readable
+/// see: https://www.worthe-it.co.za/blog/2017-01-15-aliasing-traits-in-rust.html
+pub trait TimewarpComponent: Component + Clone + std::fmt::Debug
+where
+    Self: std::marker::Sized,
+{
+}
+
+impl<T> TimewarpComponent for T
+where
+    T: Component + Clone + std::fmt::Debug,
+{
+    // Nothing to implement, since T already supports the other traits.
+}
+
 /// trait for registering components with the rollback system.
 pub trait TimewarpTraits {
     /// register component for rollback
-    fn register_rollback<T: Component + Clone + std::fmt::Debug>(&mut self) -> &mut Self;
+    fn register_rollback<T: TimewarpComponent>(&mut self) -> &mut Self;
     /// register component for rollback, and also update a TimewarpCorrection<T> component when snapping
-    fn register_rollback_with_correction_logging<T: Component + Clone + std::fmt::Debug>(
-        &mut self,
-    ) -> &mut Self;
+    fn register_rollback_with_correction_logging<T: TimewarpComponent>(&mut self) -> &mut Self;
     /// register component for rollback with additional options
-    fn register_rollback_with_options<
-        T: Component + Clone + std::fmt::Debug,
-        const CORRECTION_LOGGING: bool,
-    >(
+    fn register_rollback_with_options<T: TimewarpComponent, const CORRECTION_LOGGING: bool>(
         &mut self,
     ) -> &mut Self;
 }
 
 impl TimewarpTraits for App {
-    fn register_rollback<T: Component + Clone + std::fmt::Debug>(&mut self) -> &mut Self {
+    fn register_rollback<T: TimewarpComponent>(&mut self) -> &mut Self {
         self.register_rollback_with_options::<T, false>()
     }
-    fn register_rollback_with_correction_logging<T: Component + Clone + std::fmt::Debug>(
-        &mut self,
-    ) -> &mut Self {
+    fn register_rollback_with_correction_logging<T: TimewarpComponent>(&mut self) -> &mut Self {
         self.register_rollback_with_options::<T, true>()
     }
-    fn register_rollback_with_options<
-        T: Component + Clone + std::fmt::Debug,
-        const CORRECTION_LOGGING: bool,
-    >(
+    fn register_rollback_with_options<T: TimewarpComponent, const CORRECTION_LOGGING: bool>(
         &mut self,
     ) -> &mut Self {
         self
