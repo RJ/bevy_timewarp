@@ -166,18 +166,21 @@
 //! - Unoptimized: clones components each frame without checking if they've changed.
 //! - Doesn't rollback resources or other things, just (registered) component data.
 //!
+pub(crate) mod components;
 mod error;
 mod frame_buffer;
 mod game_clock;
-// mod sequence_buffer;
+pub(crate) mod resources;
 pub(crate) mod systems;
-mod timewarp;
+mod traits;
 
 pub mod prelude {
+    pub use crate::components::*;
     pub use crate::error::*;
     pub use crate::frame_buffer::*;
     pub use crate::game_clock::*;
-    pub use crate::timewarp::*;
+    pub use crate::resources::*;
+    pub use crate::traits::*;
     pub use crate::DespawnMarker;
     pub use crate::TimewarpConfig;
     pub use crate::TimewarpPlugin;

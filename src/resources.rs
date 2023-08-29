@@ -1,0 +1,41 @@
+use crate::FrameNumber;
+use bevy::prelude::*;
+use std::{ops::Range, time::Duration};
+
+/// Updated whenever we perform a rollback
+#[derive(Resource, Debug, Default)]
+pub struct RollbackStats {
+    pub num_rollbacks: u64,
+}
+
+/// If this resource exists, we are doing a rollback. Insert it to initate one manually.
+/// Normally you would never manually insert a Rollback, it would be trigger automatically
+/// in one of the following ways:
+///
+/// * You insert a `InsertComponentAtFrame<T>` for a past frame
+/// * You supply ServerSnapshot<T> data for a past frame
+///
+#[derive(Resource, Debug, Clone)]
+pub struct Rollback {
+    /// the range of frames, start being the target we rollback to
+    pub range: Range<FrameNumber>,
+    /// we preserve the original FixedUpdate period here and restore after rollback completes.
+    /// (during rollback, we set the FixedUpdate period to 0.0, to effect fast-forward resimulation)
+    pub original_period: Option<Duration>,
+}
+impl Rollback {
+    /// The range start..end contains all values with start <= x < end. It is empty if start >= end.
+    pub fn new(start: FrameNumber, end: FrameNumber) -> Self {
+        Self {
+            range: Range { start, end },
+            original_period: None,
+        }
+    }
+}
+
+/// Every time a rollback completes, before the `Rollback` resources is removed,
+/// we copy it into the `PreviousRollback` resources.
+///
+/// This is mainly so integration tests can tell wtaf is going on :)
+#[derive(Resource, Debug)]
+pub struct PreviousRollback(pub Rollback);
