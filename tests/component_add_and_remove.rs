@@ -26,7 +26,7 @@ fn log_all(game_clock: Res<GameClock>, q: Query<(Entity, &Enemy, &EntName, Optio
     }
 }
 
-#[derive(Component, Debug, Clone)]
+#[derive(Component, Debug, Clone, PartialEq)]
 struct Shield;
 
 /// in this test a server update adds a Shield entity in the past, which prevents the

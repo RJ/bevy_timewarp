@@ -153,7 +153,7 @@ fn error_correction() {
     assert_eq!(app.comp_val_at::<Enemy>(e1, 9).unwrap().health, 93);
     assert_eq!(app.world.get::<Enemy>(e1).unwrap().health, 93);
 
-    // supply frame 7 value at know local value, ie server confirms our simulation value
+    // supply frame 7 value at known local value, ie server confirms our simulation value
     let mut ss_e1 = app.world.get_mut::<ServerSnapshot<Enemy>>(e1).unwrap();
     ss_e1.insert(7, Enemy { health: 95 });
 
@@ -170,9 +170,8 @@ fn error_correction() {
     assert_eq!(app.comp_val_at::<Enemy>(e1, 10).unwrap().health, 92);
     assert_eq!(app.world.get::<Enemy>(e1).unwrap().health, 92);
 
-    // correction values before and after should match.
+    // no correction should be created since server confirmed predicted value,
+    // thus the frame on the TimewarpCorrection should still be 5, from the earlier correction
     let twc = app.world.get::<TimewarpCorrection<Enemy>>(e1).unwrap();
-    assert_eq!(twc.before.health, 92);
-    assert_eq!(twc.after.health, 92);
-    assert_eq!(twc.frame, 10);
+    assert_eq!(twc.frame, 5);
 }

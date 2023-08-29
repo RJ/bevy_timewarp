@@ -146,20 +146,21 @@ pub(crate) fn record_component_history<T: TimewarpComponent>(
                     comp_hist.diff_at_frame = None;
 
                     let old_val = comp_hist.at_frame(diff_frame).unwrap();
-                    // need T to be PartialEq here:
-                    // if *old_val != *comp {
-                    if let Some(mut correction) = opt_correction {
-                        correction.before = old_val.clone();
-                        correction.after = comp.clone();
-                        correction.frame = diff_frame; // current frame
-                    } else {
-                        commands.entity(entity).insert(TimewarpCorrection::<T> {
-                            before: old_val.clone(),
-                            after: comp.clone(),
-                            frame: diff_frame,
-                        });
+                    // only generate a TimewarpCorrection if predicted vs new values differ
+                    if *old_val != *comp {
+                        if let Some(mut correction) = opt_correction {
+                            correction.before = old_val.clone();
+                            correction.after = comp.clone();
+                            correction.frame = diff_frame; // current frame
+                            info!("✍️ TimewarpCorrection for {entity:?} {correction:?}");
+                        } else {
+                            commands.entity(entity).insert(TimewarpCorrection::<T> {
+                                before: old_val.clone(),
+                                after: comp.clone(),
+                                frame: diff_frame,
+                            });
+                        }
                     }
-                    // }
                 }
             }
         }

@@ -12,7 +12,7 @@ pub enum TimewarpTestSets {
     GameLogic, // game logic here
 }
 
-#[derive(Component, Default, Debug, Clone)]
+#[derive(Component, Default, Debug, Clone, PartialEq)]
 pub struct Enemy {
     pub health: i32,
 }

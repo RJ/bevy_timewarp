@@ -5,7 +5,7 @@ use super::*;
 
 /// This is an empty trait, used as a trait alias to make things more readable
 /// see: https://www.worthe-it.co.za/blog/2017-01-15-aliasing-traits-in-rust.html
-pub trait TimewarpComponent: Component + Clone + std::fmt::Debug
+pub trait TimewarpComponent: Component + Clone + PartialEq + std::fmt::Debug
 where
     Self: std::marker::Sized,
 {
@@ -13,7 +13,7 @@ where
 
 impl<T> TimewarpComponent for T
 where
-    T: Component + Clone + std::fmt::Debug,
+    T: Component + Clone + PartialEq + std::fmt::Debug,
 {
     // Nothing to implement, since T already supports the other traits.
 }
