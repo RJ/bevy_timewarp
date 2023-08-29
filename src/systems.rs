@@ -190,7 +190,7 @@ pub(crate) fn insert_components_at_prior_frames<T: Component + Clone + std::fmt:
         // the ComponentHistory and ServerSnapshot components.
         // If they already exist, just insert at the correct frame.
         if let Some(mut ch) = opt_ch {
-            ch.insert_authoritative(icaf.frame, icaf.component.clone(), &entity);
+            ch.insert(icaf.frame, icaf.component.clone(), &entity);
             ch.report_birth_at_frame(icaf.frame);
             trace!("Inserting component at past frame for existing ComponentHistory");
         } else {
@@ -198,7 +198,7 @@ pub(crate) fn insert_components_at_prior_frames<T: Component + Clone + std::fmt:
                 timewarp_config.rollback_window as usize,
                 icaf.frame,
             );
-            ch.insert_authoritative(icaf.frame, icaf.component.clone(), &entity);
+            ch.insert(icaf.frame, icaf.component.clone(), &entity);
             ent_cmd.insert(ch);
             trace!("Inserting component at past frame by inserting new ComponentHistory");
         }
@@ -263,7 +263,7 @@ pub(crate) fn trigger_rollback_when_snapshot_added<T: Component + Clone + std::f
             .at_frame(snap_frame)
             .expect("snap_frame must have a value here");
 
-        comp_hist.insert_authoritative(rollback_frame, comp.clone(), &entity);
+        comp_hist.insert(rollback_frame, comp.clone(), &entity);
 
         info!("f={:?} SNAPPING and Triggering rollback due to snapshot. {entity:?} {opt_anach:?} snap_frame: {snap_frame} target_frame {target_frame} rollback_frame {rollback_frame}", game_clock.frame());
 
@@ -317,7 +317,7 @@ pub(crate) fn apply_snapshot_to_component_if_available<T: Component + Clone + st
             }
             // note we are replacing the current frame comp val even if we fetched it from
             // an older frame in the case of anachronous entities.
-            comp_history.insert_authoritative(game_clock.frame(), new_comp_val.clone(), &entity);
+            comp_history.insert(game_clock.frame(), new_comp_val.clone(), &entity);
             *comp = new_comp_val.clone();
         }
     }

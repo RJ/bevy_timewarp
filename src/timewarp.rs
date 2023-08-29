@@ -132,7 +132,6 @@ impl<T: Component + Clone + std::fmt::Debug> ServerSnapshot<T> {
 pub struct ComponentHistory<T: Component + Clone + std::fmt::Debug> {
     pub values: FrameBuffer<T>,        // not pub!
     pub alive_ranges: Vec<FrameRange>, // inclusive! unlike std:range
-    pub most_recent_authoritative_frame: FrameNumber,
     /// when we insert at this frame, compute diff between newly inserted val and whatever already exists in the buffer.
     /// this is for visual smoothing post-rollback.
     /// (if the simulation is perfect the diff would be zero, but will be unavoidably non-zero when dealing with collisions between anachronous entities for example.)
@@ -147,7 +146,6 @@ impl<T: Component + Clone + std::fmt::Debug> ComponentHistory<T> {
         let mut this = Self {
             values: FrameBuffer::with_capacity(len),
             alive_ranges: Vec::new(),
-            most_recent_authoritative_frame: birth_frame,
             diff_at_frame: None,
             correction_logging_enabled: false,
         };
@@ -162,10 +160,6 @@ impl<T: Component + Clone + std::fmt::Debug> ComponentHistory<T> {
         self.values.get(frame)
     }
     // adding entity just for debugging print outs.
-    pub fn insert_authoritative(&mut self, frame: FrameNumber, val: T, entity: &Entity) {
-        self.most_recent_authoritative_frame = frame;
-        self.insert(frame, val, entity);
-    }
     pub fn insert(&mut self, frame: FrameNumber, val: T, entity: &Entity) {
         trace!("CH.Insert {entity:?} {frame} = {val:?}");
         self.values.insert(frame, val);
@@ -193,55 +187,38 @@ impl<T: Component + Clone + std::fmt::Debug> ComponentHistory<T> {
     }
 }
 
-#[derive(PartialEq, Eq)]
-pub enum ComponentRollbackOptions {
-    Nothing = 0,
-    CorrectionLogging = 1,
-}
-
 /// trait for registering components with the rollback system.
 pub trait TimewarpTraits {
     /// register component for rollback
     fn register_rollback<T: Component + Clone + std::fmt::Debug>(&mut self) -> &mut Self;
-    /// register component for rollback, and also update a TimewarpCorrection component when snapping
+    /// register component for rollback, and also update a TimewarpCorrection<T> component when snapping
     fn register_rollback_with_correction_logging<T: Component + Clone + std::fmt::Debug>(
         &mut self,
     ) -> &mut Self;
     /// register component for rollback with additional options
-    fn register_rollback_with_options<T: Component + Clone + std::fmt::Debug>(
+    fn register_rollback_with_options<
+        T: Component + Clone + std::fmt::Debug,
+        const CORRECTION_LOGGING: bool,
+    >(
         &mut self,
-        opts: ComponentRollbackOptions,
     ) -> &mut Self;
 }
 
 impl TimewarpTraits for App {
     fn register_rollback<T: Component + Clone + std::fmt::Debug>(&mut self) -> &mut Self {
-        self.register_rollback_with_options::<T>(ComponentRollbackOptions::Nothing)
+        self.register_rollback_with_options::<T, false>()
     }
     fn register_rollback_with_correction_logging<T: Component + Clone + std::fmt::Debug>(
         &mut self,
     ) -> &mut Self {
-        self.register_rollback_with_options::<T>(ComponentRollbackOptions::CorrectionLogging)
+        self.register_rollback_with_options::<T, true>()
     }
-    fn register_rollback_with_options<T: Component + Clone + std::fmt::Debug>(
+    fn register_rollback_with_options<
+        T: Component + Clone + std::fmt::Debug,
+        const CORRECTION_LOGGING: bool,
+    >(
         &mut self,
-        opts: ComponentRollbackOptions,
     ) -> &mut Self {
-        // we need to insert the ComponentTimeline<T> component to log history
-        // and add systems to update/apply it
-        if opts == ComponentRollbackOptions::CorrectionLogging {
-            self.add_systems(
-                FixedUpdate,
-                add_timewarp_buffer_components::<T, true>
-                    .in_set(TimewarpSet::RecordComponentValues),
-            );
-        } else {
-            self.add_systems(
-                FixedUpdate,
-                add_timewarp_buffer_components::<T, false>
-                    .in_set(TimewarpSet::RecordComponentValues),
-            );
-        }
         self
             // we want to record frame values even if we're about to rollback -
             // we need values pre-rb to diff against post-rb versions.
@@ -252,6 +229,7 @@ impl TimewarpTraits for App {
             .add_systems(
                 FixedUpdate,
                 (
+                    add_timewarp_buffer_components::<T, CORRECTION_LOGGING>,
                     // Recording component births. this does the Added<> query, and bails if in rollback
                     // so that the Added query is refreshed.
                     record_component_birth::<T>,

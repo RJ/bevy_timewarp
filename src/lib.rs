@@ -1,9 +1,10 @@
 //! Buffer and rollback to states up to a few frames ago, for rollback networking.
 //!
-//! Doesn't do any networking, just concerned with buffering old entity states in order to
+//! Doesn't do any networking, just concerned with buffering old component states in order to
 //! revert values to previous frames and quickly fast-forward back to the original frame.
 //! Assumes game logic uses bevy's `FixedUpdate` schedule.
 //!
+//! Current status: under development alongside a multiplayer server-authoritative game.
 //!
 //! ## Typical scenario this crate is built for
 //!
