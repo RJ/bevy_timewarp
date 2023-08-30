@@ -37,7 +37,7 @@ pub fn setup_test_app() -> App {
 // and do 1 app.update
 pub fn tick(app: &mut App) {
     let mut fxt = app.world.resource_mut::<FixedTime>();
-    let period = fxt.period.clone();
+    let period = fxt.period;
     info!("<tick>");
     fxt.tick(period);
     app.update();
@@ -46,11 +46,7 @@ pub fn tick(app: &mut App) {
 
 // some syntactic sugar, just to make tests less of an eyesore:
 pub(crate) trait TimewarpTestTraits {
-    fn comp_val_at<T: Component + Clone + std::fmt::Debug>(
-        &self,
-        entity: Entity,
-        frame: FrameNumber,
-    ) -> Option<&T>;
+    fn comp_val_at<T: TimewarpComponent>(&self, entity: Entity, frame: FrameNumber) -> Option<&T>;
 }
 
 impl TimewarpTestTraits for App {

@@ -1,4 +1,4 @@
-use crate::{FrameBuffer, FrameNumber};
+use crate::{FrameBuffer, FrameNumber, TimewarpComponent};
 use bevy::prelude::*;
 
 /// entities with NotRollbackable are ignored, even if they have components which
@@ -58,11 +58,11 @@ impl Anachronous {
 /// commands.entity(e).insert(InsertComponentAtFrame::<Shield>(shield_comp, past_frame))
 /// ```
 #[derive(Component, Debug)]
-pub struct InsertComponentAtFrame<T: Component + Clone + std::fmt::Debug> {
+pub struct InsertComponentAtFrame<T: TimewarpComponent> {
     pub component: T,
     pub frame: FrameNumber,
 }
-impl<T: Component + Clone + std::fmt::Debug> InsertComponentAtFrame<T> {
+impl<T: TimewarpComponent> InsertComponentAtFrame<T> {
     pub fn new(frame: FrameNumber, component: T) -> Self {
         Self { component, frame }
     }
@@ -74,7 +74,7 @@ impl<T: Component + Clone + std::fmt::Debug> InsertComponentAtFrame<T> {
 /// ie, the values before and after the rollback differ.
 /// in your game, look for Changed<TimewarpCorrection<T>> and use for any visual smoothing/interp stuff.
 #[derive(Component, Debug, Clone)]
-pub struct TimewarpCorrection<T: Component + Clone + std::fmt::Debug> {
+pub struct TimewarpCorrection<T: TimewarpComponent> {
     pub before: T,
     pub after: T,
     pub frame: FrameNumber,
@@ -82,10 +82,10 @@ pub struct TimewarpCorrection<T: Component + Clone + std::fmt::Debug> {
 
 /// Buffers the last few authoritative component values received from the server
 #[derive(Component)]
-pub struct ServerSnapshot<T: Component + Clone + std::fmt::Debug> {
+pub struct ServerSnapshot<T: TimewarpComponent> {
     pub values: FrameBuffer<T>,
 }
-impl<T: Component + Clone + std::fmt::Debug> ServerSnapshot<T> {
+impl<T: TimewarpComponent> ServerSnapshot<T> {
     pub fn with_capacity(len: usize) -> Self {
         Self {
             values: FrameBuffer::with_capacity(len),
@@ -105,7 +105,7 @@ pub type FrameRange = (FrameNumber, Option<FrameNumber>);
 
 /// Buffers component values for the last few frames.
 #[derive(Component)]
-pub struct ComponentHistory<T: Component + Clone + std::fmt::Debug> {
+pub struct ComponentHistory<T: TimewarpComponent> {
     pub values: FrameBuffer<T>,        // not pub!
     pub alive_ranges: Vec<FrameRange>, // inclusive! unlike std:range
     /// when we insert at this frame, compute diff between newly inserted val and whatever already exists in the buffer.
@@ -117,7 +117,7 @@ pub struct ComponentHistory<T: Component + Clone + std::fmt::Debug> {
 
 // lazy first version - don't need a clone each frame if value hasn't changed!
 // just store once and reference from each unchanged frame number.
-impl<T: Component + Clone + std::fmt::Debug> ComponentHistory<T> {
+impl<T: TimewarpComponent> ComponentHistory<T> {
     pub fn with_capacity(len: usize, birth_frame: FrameNumber) -> Self {
         let mut this = Self {
             values: FrameBuffer::with_capacity(len),
