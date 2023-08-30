@@ -51,11 +51,7 @@ pub(crate) trait TimewarpTestTraits {
 
 impl TimewarpTestTraits for App {
     /// "Give me an Option<T> for the value of the Component T beloning to this entity, at a specific frame"
-    fn comp_val_at<T: Component + Clone + std::fmt::Debug>(
-        &self,
-        entity: Entity,
-        frame: FrameNumber,
-    ) -> Option<&T> {
+    fn comp_val_at<T: TimewarpComponent>(&self, entity: Entity, frame: FrameNumber) -> Option<&T> {
         self.world
             .get::<ComponentHistory<T>>(entity)
             .expect("Should be a ComponentHistory here")
