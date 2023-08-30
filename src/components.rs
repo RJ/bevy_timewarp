@@ -18,6 +18,10 @@ pub struct Anachronous {
     /// frame number of most recent input command for this entity
     /// used in calculation for frame lag for anachronous entities
     newest_input_frame: FrameNumber,
+
+    pub max_prediction_frames: FrameNumber,
+    pub input_frame_lag: FrameNumber,
+    pub snapshot_frame_lag: FrameNumber,
 }
 impl Anachronous {
     pub fn new(frames_behind: FrameNumber) -> Self {
@@ -25,6 +29,9 @@ impl Anachronous {
             frames_behind,
             newest_snapshot_frame: 0,
             newest_input_frame: 0,
+            max_prediction_frames: 0,
+            input_frame_lag: 0,
+            snapshot_frame_lag: 0,
         }
     }
     pub fn newest_snapshot_frame(&self) -> FrameNumber {
