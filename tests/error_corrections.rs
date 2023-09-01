@@ -1,3 +1,16 @@
+/*
+    In what scenarios should a TimewarpCorrection be generated?
+
+    1)  When a non-anachronous entity receives a ServerSnapshot in the past for
+        a component registered with correction logging:
+
+        trigger_rollback_when_snapshot_added will detect the SS change,
+        set comp_hist.diff_at_frame
+
+
+
+*/
+
 use bevy::prelude::*;
 use bevy_timewarp::prelude::*;
 
@@ -70,7 +83,10 @@ fn error_correction() {
 
     // let's pretend during frame 5 we get a message from the server saying that on frame 2, E1
     // ate a powerup, changing his health to 100.
-    // our app's netcode would insert the authoritative (slightly outdated) values into ServerSnapshots:
+    // our app's netcode would insert the authoritative (slightly outdated) values into ServerSnapshots.
+    // then, the trigger_rollback_when_snapshot_added system would detect that
+    // a new snapshot is available for `Enemy`, and schedule a rollback alongside setting the
+    // diff_at_frame flag for the current frame, so a TimewarpCorrection is generated.
 
     let mut ss_e1 = app.world.get_mut::<ServerSnapshot<Enemy>>(e1).unwrap();
     ss_e1.insert(2, Enemy { health: 100 });
@@ -82,8 +98,7 @@ fn error_correction() {
 
     tick(&mut app); // frame 5, we expect a rollback
 
-    // TODO i've broken TimewarpCorrections because i've changed around how we trigger rollbacks
-    //  need to add that back in to various places / review.
+
     assert!(app.world.get::<TimewarpCorrection<Enemy>>(e1).is_some());
 
     assert_eq!(
@@ -116,6 +131,7 @@ fn error_correction() {
     assert_eq!(twc.after.health, 97);
     assert_eq!(twc.frame, 5);
 
+    warn!("{twc:?}");
     // NB rendering is happening in PostUpdate, which runs after FixedUpdate
     //    * FixedUpdate @ 4 (normal frame)
     //    * PostUpdate render

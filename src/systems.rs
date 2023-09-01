@@ -127,38 +127,27 @@ pub(crate) fn record_component_history<T: TimewarpComponent>(
     )>,
     game_clock: Res<GameClock>,
     mut commands: Commands,
+    opt_rb: Option<Res<Rollback>>,
 ) {
     for (entity, comp, mut comp_hist, opt_correction) in q.iter_mut() {
-        // this is where we generate a TimewarpCorrection if needed.
-        //
-        // If ComponentHistory.diff_at_frame matches the current frame, we must have rolled back
-        // and resimulated forward to a frame that already has data.
-        //
-        // Before we replace what's in the comp history buffer for this frame, we
-        // take a look at it, and compute the diff. this represents the error in our simulation.
-        // since the change will cause the simulation to snap to the new values.
-        //
-        // TODO `T` isn't PartialEq at the mo, if it was, we could check if old_val == new_val
-        //       and skip creating a correction. Presently the game has to do this.
+        // if we're in rollback, and on the last frame, we're about to overwrite something.
+        // we need to preserve it an report a misprediction, if it differs from the new value.
         if comp_hist.correction_logging_enabled {
-            if let Some(diff_frame) = comp_hist.diff_at_frame {
-                if diff_frame == game_clock.frame() {
-                    comp_hist.diff_at_frame = None;
-
-                    let old_val = comp_hist.at_frame(diff_frame).unwrap();
-                    // only generate a TimewarpCorrection if predicted vs new values differ
-                    if *old_val != *comp {
-                        if let Some(mut correction) = opt_correction {
-                            correction.before = old_val.clone();
-                            correction.after = comp.clone();
-                            correction.frame = diff_frame; // current frame
-                            info!("✍️ TimewarpCorrection for {entity:?} {correction:?}");
-                        } else {
-                            commands.entity(entity).insert(TimewarpCorrection::<T> {
-                                before: old_val.clone(),
-                                after: comp.clone(),
-                                frame: diff_frame,
-                            });
+            if let Some(ref rb) = opt_rb {
+                if rb.range.end == game_clock.frame() {
+                    if let Some(old_val) = comp_hist.at_frame(game_clock.frame()) {
+                        if *old_val != *comp {
+                            if let Some(mut correction) = opt_correction {
+                                correction.before = old_val.clone();
+                                correction.after = comp.clone();
+                                correction.frame = game_clock.frame();
+                            } else {
+                                commands.entity(entity).insert(TimewarpCorrection::<T> {
+                                    before: old_val.clone(),
+                                    after: comp.clone(),
+                                    frame: game_clock.frame(),
+                                });
+                            }
                         }
                     }
                 }
@@ -237,7 +226,7 @@ pub(crate) fn trigger_rollback_when_snapshot_added<T: TimewarpComponent>(
             &ServerSnapshot<T>,
             &mut ComponentHistory<T>,
         ),
-        Or<(Changed<ServerSnapshot<T>>, Added<ServerSnapshot<T>>)>,
+        Changed<ServerSnapshot<T>>, // this includes Added<>
     >,
     game_clock: Res<GameClock>,
     mut rb_ev: ResMut<Events<RollbackRequest>>,
@@ -261,10 +250,12 @@ pub(crate) fn trigger_rollback_when_snapshot_added<T: TimewarpComponent>(
 
         // if we rollback to f = (snap_frame + frames_behind), the anachronous entity will load and apply
         // this snapshot at f, because it deducts frames_behind before looking for snaps or inputs.
+        // HOWEVER, we do have to insert it into comp history, because if we rollback exactly to
+        // target_frame the `apply_snapshot_to_component` won't have run, and we need it in there.
+        // so we write the new SS value to comp_history at f (aka rollback_frame) before rolling
+        // back - then rollback_component will load it into the actual component from comp_hist.
 
         let rollback_frame = snap_frame + frames_behind;
-        // insert into comp history, because if we rollback exactly to target_frame
-        // the `apply_snapshot_to_component` won't have run, and we need it in there.
         let comp = server_snapshot
             .at_frame(snap_frame)
             .expect("snap_frame must have a value here");
@@ -272,10 +263,6 @@ pub(crate) fn trigger_rollback_when_snapshot_added<T: TimewarpComponent>(
         comp_hist.insert(rollback_frame, comp.clone(), &entity);
 
         debug!("f={:?} SNAPPING and Triggering rollback due to snapshot. {entity:?} {opt_anach:?} snap_frame: {snap_frame} target_frame {target_frame} rollback_frame {rollback_frame}", game_clock.frame());
-
-        if comp_hist.correction_logging_enabled {
-            comp_hist.diff_at_frame = Some(game_clock.frame());
-        }
         // trigger a rollback
         //
         // Although this is the only system that asks for rollbacks, we request them
@@ -310,7 +297,7 @@ pub(crate) fn apply_snapshot_to_component_if_available<T: TimewarpComponent>(
             .frame()
             .saturating_sub(opt_anach.map_or(0, |anach| anach.frames_behind));
 
-        let verbose = false; // std::any::type_name::<T>().contains("::Position");
+        let verbose = opt_anach.is_none() && std::any::type_name::<T>().contains("::Position");
 
         // is there a snapshot value for our target_frame?
         if let Some(new_comp_val) = comp_server.values.get(target_frame) {

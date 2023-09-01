@@ -115,10 +115,6 @@ pub type FrameRange = (FrameNumber, Option<FrameNumber>);
 pub struct ComponentHistory<T: TimewarpComponent> {
     pub values: FrameBuffer<T>,        // not pub!
     pub alive_ranges: Vec<FrameRange>, // inclusive! unlike std:range
-    /// when we insert at this frame, compute diff between newly inserted val and whatever already exists in the buffer.
-    /// this is for visual smoothing post-rollback.
-    /// (if the simulation is perfect the diff would be zero, but will be unavoidably non-zero when dealing with collisions between anachronous entities for example.)
-    pub diff_at_frame: Option<FrameNumber>,
     pub correction_logging_enabled: bool,
 }
 
@@ -129,7 +125,6 @@ impl<T: TimewarpComponent> ComponentHistory<T> {
         let mut this = Self {
             values: FrameBuffer::with_capacity(len),
             alive_ranges: Vec::new(),
-            diff_at_frame: None,
             correction_logging_enabled: false,
         };
         this.report_birth_at_frame(birth_frame);
