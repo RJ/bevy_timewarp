@@ -117,7 +117,6 @@ pub struct ComponentHistory<T: TimewarpComponent> {
     pub alive_ranges: Vec<FrameRange>, // inclusive! unlike std:range
     /// when we insert at this frame, compute diff between newly inserted val and whatever already exists in the buffer.
     /// this is for visual smoothing post-rollback.
-    /// (if the simulation is perfect the diff would be zero, but will be unavoidably non-zero when dealing with collisions between anachronous entities for example.)
     pub diff_at_frame: Option<FrameNumber>,
     pub correction_logging_enabled: bool,
 }
