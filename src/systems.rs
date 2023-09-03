@@ -82,6 +82,7 @@ pub(crate) fn add_timewarp_buffer_components<
             comp.clone(),
         );
         commands.entity(e).insert((
+            TimewarpStatus::new(0),
             comp_history,
             // server snapshots are sent event n frames, so there are going to be lots of Nones in
             // the sequence buffer. increase capacity accordingly.
@@ -150,6 +151,8 @@ pub(crate) fn record_component_history<T: TimewarpComponent>(
                                 });
                             }
                         }
+                    } else {
+                        warn!("End of rb range, but no existing comp to correct");
                     }
                 }
             }
@@ -169,19 +172,26 @@ pub(crate) fn insert_components_at_prior_frames<T: TimewarpComponent>(
         (
             Entity,
             &InsertComponentAtFrame<T>,
+            // NOTE the timewarp components might not have been added if this is a first-timer entity
+            // which is why they have to be Option<> here, in case we need to insert them.
             Option<&mut ComponentHistory<T>>,
             Option<&mut ServerSnapshot<T>>,
+            Option<&mut TimewarpStatus>,
         ),
         Added<InsertComponentAtFrame<T>>,
     >,
     mut commands: Commands,
     timewarp_config: Res<TimewarpConfig>,
 ) {
-    for (entity, icaf, opt_ch, opt_ss) in q.iter_mut() {
+    for (entity, icaf, opt_ch, opt_ss, opt_tw_status) in q.iter_mut() {
         // warn!("{icaf:?}");
         let mut ent_cmd = commands.entity(entity);
         ent_cmd.remove::<InsertComponentAtFrame<T>>();
-
+        if let Some(mut tw_status) = opt_tw_status {
+            tw_status.set_snapped_at(icaf.frame);
+        } else {
+            ent_cmd.insert(TimewarpStatus::new(icaf.frame));
+        }
         // if the entity never had this component type T before, we'll need to insert
         // the ComponentHistory and ServerSnapshot components.
         // If they already exist, just insert at the correct frame.
@@ -216,19 +226,26 @@ pub(crate) fn insert_components_at_prior_frames<T: TimewarpComponent>(
 /// If a new snapshot was added, we may need to initiate a rollback to that frame
 pub(crate) fn trigger_rollback_when_snapshot_added<T: TimewarpComponent>(
     mut q: Query<
-        (Entity, &ServerSnapshot<T>, &mut ComponentHistory<T>),
+        (
+            Entity,
+            &ServerSnapshot<T>,
+            &mut ComponentHistory<T>,
+            &mut TimewarpStatus,
+        ),
         Changed<ServerSnapshot<T>>, // this includes Added<>
     >,
     game_clock: Res<GameClock>,
     mut rb_ev: ResMut<Events<RollbackRequest>>,
 ) {
-    for (entity, server_snapshot, mut comp_hist) in q.iter_mut() {
+    for (entity, server_snapshot, mut comp_hist, mut tw_status) in q.iter_mut() {
         let snap_frame = server_snapshot.values.newest_frame();
 
         if snap_frame == 0 {
             continue;
         }
         // if this snapshot is ahead of where we want the entity to be, it's useless to rollback
+        // TODO test if we get a snapshot for the frame we just processed.. what if snap_frame == game_clock.frame()
+        // does the value still get applied?
         if snap_frame > game_clock.frame() {
             warn!(
                 "f={:?} {entity:?} Snap frame {snap_frame} > f",
@@ -236,6 +253,7 @@ pub(crate) fn trigger_rollback_when_snapshot_added<T: TimewarpComponent>(
             );
             continue;
         }
+        tw_status.set_snapped_at(snap_frame);
         // insert into comp history, because if we rollback exactly to snap-frame
         // the `apply_snapshot_to_component` won't have run, and we need it in there.
         let comp_from_snapshot = server_snapshot
@@ -257,35 +275,33 @@ pub(crate) fn trigger_rollback_when_snapshot_added<T: TimewarpComponent>(
     }
 }
 
-/// if we are at a frame where a snapshot exists, apply the SS value to the component.
-pub(crate) fn apply_snapshot_to_component_if_available<T: TimewarpComponent>(
-    mut q: Query<(Entity, &mut T, &mut ComponentHistory<T>, &ServerSnapshot<T>)>,
-    game_clock: Res<GameClock>,
-) {
-    for (entity, mut comp, mut comp_history, comp_server) in q.iter_mut() {
-        if comp_server.values.newest_frame() == 0 {
-            // no data yet
-            continue;
-        }
+// /// if we are at a frame where a snapshot exists, apply the SS value to the component.
+// pub(crate) fn apply_snapshot_to_component_if_available<T: TimewarpComponent>(
+//     mut q: Query<(Entity, &mut T, &mut ComponentHistory<T>, &ServerSnapshot<T>)>,
+//     game_clock: Res<GameClock>,
+// ) {
+//     for (entity, mut comp, mut comp_history, comp_server) in q.iter_mut() {
+//         if comp_server.values.newest_frame() == 0 {
+//             // no data yet
+//             continue;
+//         }
 
-        let verbose = true; // std::any::type_name::<T>().contains("::Position");
+//         let verbose = true; // std::any::type_name::<T>().contains("::Position");
 
-        // is there a snapshot value for our target_frame?
-        if let Some(new_comp_val) = comp_server.values.get(game_clock.frame()) {
-            if verbose {
-                info!(
-                    "🫰 f={:?} SNAPPING for {:?}",
-                    game_clock.frame(),
-                    std::any::type_name::<T>(),
-                );
-            }
-            // note we are replacing the current frame comp val even if we fetched it from
-            // an older frame in the case of anachronous entities.
-            comp_history.insert(game_clock.frame(), new_comp_val.clone(), &entity);
-            *comp = new_comp_val.clone();
-        }
-    }
-}
+//         // is there a snapshot value for our target_frame?
+//         if let Some(new_comp_val) = comp_server.values.get(game_clock.frame()) {
+//             if verbose {
+//                 info!(
+//                     "🫰 f={:?} SNAPPING for {:?}",
+//                     game_clock.frame(),
+//                     std::any::type_name::<T>(),
+//                 );
+//             }
+//             comp_history.insert(game_clock.frame(), new_comp_val.clone(), &entity);
+//             *comp = new_comp_val.clone();
+//         }
+//     }
+// }
 
 /// when components are removed, we log the death frame
 pub(crate) fn record_component_death<T: TimewarpComponent>(

@@ -69,7 +69,7 @@ impl TimewarpTraits for App {
             .add_systems(
                 FixedUpdate,
                 (
-                    apply_snapshot_to_component_if_available::<T>,
+                    // apply_snapshot_to_component_if_available::<T>,
                     rekill_components_during_rollback::<T>,
                     rebirth_components_during_rollback::<T>,
                     clear_removed_components_queue::<T>
@@ -95,7 +95,7 @@ impl TimewarpTraits for App {
                 FixedUpdate,
                 (
                     record_component_death::<T>,
-                    apply_snapshot_to_component_if_available::<T>,
+                    // apply_snapshot_to_component_if_available::<T>,
                     trigger_rollback_when_snapshot_added::<T>,
                 )
                     .before(consolidate_rollback_requests)

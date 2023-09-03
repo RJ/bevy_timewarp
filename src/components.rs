@@ -6,55 +6,27 @@ use bevy::prelude::*;
 #[derive(Component)]
 pub struct NotRollbackable;
 
-/// Tells us this entity is to be rendered in the past
-/// based on snapshots received from the server.
-/// aka Predicted maybe, if we actually predict inputs into the future?
-#[derive(Component, Clone, Debug)]
-pub struct Anachronous {
-    pub frames_behind: FrameNumber,
-    /// frame of last server snapshot update.
-    /// used in calculation for frame lag for anachronous entities
-    newest_snapshot_frame: FrameNumber,
-    /// frame number of most recent input command for this entity
-    /// used in calculation for frame lag for anachronous entities
-    newest_input_frame: FrameNumber,
-
-    pub max_prediction_frames: FrameNumber,
-    pub input_frame_lag: FrameNumber,
-    pub snapshot_frame_lag: FrameNumber,
+/// Added to every entity, for tracking which frame they were last synced to a snapshot
+/// Deduct `last_snapshot_frame` from the current frame to determine how many frames this
+/// entity is predicted ahead for.
+#[derive(Component)]
+pub struct TimewarpStatus {
+    last_snapshot_frame: FrameNumber,
 }
-impl Anachronous {
-    pub fn new(frames_behind: FrameNumber) -> Self {
+
+impl TimewarpStatus {
+    pub fn new(last_snapshot_frame: FrameNumber) -> Self {
         Self {
-            frames_behind,
-            newest_snapshot_frame: 0,
-            newest_input_frame: 0,
-            max_prediction_frames: 0,
-            input_frame_lag: 0,
-            snapshot_frame_lag: 0,
+            last_snapshot_frame,
         }
     }
-    pub fn newest_snapshot_frame(&self) -> FrameNumber {
-        self.newest_snapshot_frame
+    /// returns the frame of the most recent snapshot,
+    /// telling you when any component of this entity was most recently updated.
+    pub fn last_snap_frame(&self) -> FrameNumber {
+        self.last_snapshot_frame
     }
-    pub fn newest_input_frame(&self) -> FrameNumber {
-        self.newest_input_frame
-    }
-    pub fn set_newest_snapshot_frame(&mut self, newest_frame: FrameNumber) -> bool {
-        if newest_frame > self.newest_snapshot_frame {
-            self.newest_snapshot_frame = newest_frame;
-            true
-        } else {
-            false
-        }
-    }
-    pub fn set_newest_input_frame(&mut self, newest_frame: FrameNumber) -> bool {
-        if newest_frame > self.newest_input_frame {
-            self.newest_input_frame = newest_frame;
-            true
-        } else {
-            false
-        }
+    pub fn set_snapped_at(&mut self, frame: FrameNumber) {
+        self.last_snapshot_frame = self.last_snapshot_frame.max(frame);
     }
 }
 
