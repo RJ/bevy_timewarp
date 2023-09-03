@@ -138,7 +138,10 @@ pub(crate) fn record_component_history<T: TimewarpComponent>(
                 if rb.range.end == game_clock.frame() {
                     if let Some(old_val) = comp_hist.at_frame(game_clock.frame()) {
                         if *old_val != *comp {
-                            warn!("Generating Correction");
+                            warn!(
+                                "Generating Correction for {entity:?} old:{:?} new{:?}",
+                                old_val, comp
+                            );
                             if let Some(mut correction) = opt_correction {
                                 correction.before = old_val.clone();
                                 correction.after = comp.clone();
@@ -194,17 +197,16 @@ pub(crate) fn insert_components_at_prior_frames<T: TimewarpComponent>(
         }
         // if the entity never had this component type T before, we'll need to insert
         // the ComponentHistory and ServerSnapshot components.
-        // If they already exist, just insert at the correct frame.
+        // NOTE: don't insert historial value into ComponentHistory, only ServerSnapshot.
+        // let trigger_rollback_when... copy it to CH, or things break.
         if let Some(mut ch) = opt_ch {
-            ch.insert(icaf.frame, icaf.component.clone(), &entity);
             ch.report_birth_at_frame(icaf.frame);
             trace!("Inserting component at past frame for existing ComponentHistory");
         } else {
-            let mut ch = ComponentHistory::<T>::with_capacity(
+            let ch = ComponentHistory::<T>::with_capacity(
                 timewarp_config.rollback_window as usize,
                 icaf.frame,
             );
-            ch.insert(icaf.frame, icaf.component.clone(), &entity);
             ent_cmd.insert(ch);
             trace!("Inserting component at past frame by inserting new ComponentHistory");
         }
@@ -254,11 +256,22 @@ pub(crate) fn trigger_rollback_when_snapshot_added<T: TimewarpComponent>(
             continue;
         }
         tw_status.set_snapped_at(snap_frame);
+
         // insert into comp history, because if we rollback exactly to snap-frame
         // the `apply_snapshot_to_component` won't have run, and we need it in there.
         let comp_from_snapshot = server_snapshot
             .at_frame(snap_frame)
             .expect("snap_frame must have a value here");
+
+        // check if our historical value for the snap_frame is the same as what snapshot says
+        // because if they match, we predicted successfully, and there's no need to rollback.
+        if let Some(stored_comp_val) = comp_hist.at_frame(snap_frame) {
+            if *stored_comp_val == *comp_from_snapshot {
+                // a correct prediction, no need to rollback. hooray!
+                // info!("skipping rollback 🎖️ {stored_comp_val:?}");
+                continue;
+            }
+        }
 
         comp_hist.insert(snap_frame, comp_from_snapshot.clone(), &entity);
 

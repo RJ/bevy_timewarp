@@ -204,14 +204,15 @@ fn basic_rollback() {
     // so lets make the server confirm that:
     ss_e2.insert(5, Enemy { health: 97 });
 
-    tick(&mut app); // frame 8, expecting another rollback
+    tick(&mut app); // frame 8, potential rollback
 
+    // but no  - our prediction matches the snapshot so it didn't roll back.
     assert_eq!(
         app.world
             .get_resource::<RollbackStats>()
             .unwrap()
             .num_rollbacks,
-        2
+        1
     );
 
     assert_eq!(app.comp_val_at::<Enemy>(e2, 8).unwrap().health, 94);

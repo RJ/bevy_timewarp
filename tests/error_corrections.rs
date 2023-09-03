@@ -98,7 +98,6 @@ fn error_correction() {
 
     tick(&mut app); // frame 5, we expect a rollback
 
-
     assert!(app.world.get::<TimewarpCorrection<Enemy>>(e1).is_some());
 
     assert_eq!(
@@ -173,14 +172,14 @@ fn error_correction() {
     let mut ss_e1 = app.world.get_mut::<ServerSnapshot<Enemy>>(e1).unwrap();
     ss_e1.insert(7, Enemy { health: 95 });
 
-    tick(&mut app); // frame 10 - rollback
+    tick(&mut app); // frame 10 - rollback? no. should be bypassed because prediction was right
 
     assert_eq!(
         app.world
             .get_resource::<RollbackStats>()
             .unwrap()
             .num_rollbacks,
-        2
+        1
     );
 
     assert_eq!(app.comp_val_at::<Enemy>(e1, 10).unwrap().health, 92);

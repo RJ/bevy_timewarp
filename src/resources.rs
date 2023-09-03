@@ -2,11 +2,15 @@ use crate::FrameNumber;
 use bevy::prelude::*;
 use std::{ops::Range, time::Duration};
 
-#[derive(Resource, Debug, Copy, Clone)]
+#[derive(Resource, Debug, Copy, Clone, Default)]
 pub struct TimewarpConfig {
     /// how many frames of old component values should we buffer?
     /// can't roll back any further than this. will depend on network lag and game mechanics.
     pub rollback_window: FrameNumber,
+    /// if set to true, a rollback will be initiated even if
+    /// the stored predicted value matches the server snapshot.
+    /// meant as a worst-case scenario for checking performance really.
+    pub force_rollback_always: bool,
 }
 
 /// Updated whenever we perform a rollback

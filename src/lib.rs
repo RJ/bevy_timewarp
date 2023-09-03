@@ -5,15 +5,27 @@
 //! Assumes game logic uses bevy's `FixedUpdate` schedule.
 //!
 //! Current status: under development alongside a multiplayer server-authoritative game.
+//! I am "RJ" on bevy's discord, in the networking channel, if you want to discuss.
 //!
-//! ## Typical scenario this crate is built for
+//! ## "Sports Games"
+//!
+//! This crate is built for so called "sports games" where dynamic entities interact in the same
+//! timeframe. That means clients simulate all entities into the future, in the same timeframe as
+//! the local player. This necessitates predicting player inputs.
+//!
+//! This is quite different to traditional Quake style FPS netcode, which is for a mostly static
+//! world, with players running around shooting eachother. In Quake style, you are always seeing
+//! a delayed version of other players, interpolated between two snapshots. The server does
+//! backwards reconcilliation / lag compensation to verify hits.
+//!
+//! ### Example rollback scenario:
 //!
 //! In your client/server game:
 //!
 //! - client is simulating frame 10
 //! - server snapshot for frame 6 arrives, including values for an entity's component T
 //! - client updates entity's ServerSnapshot<T> value at frame 6 (ie, the past)
-//! - Timewarp triggers a rollback to frame 6:
+//! - Timewarp triggers a rollback to frame 6 if snapshot != our stored value for frame 6.
 //! - - winds back frame counter to 6
 //!   - copies the server snapshot value to the component
 //!   - resimulates frames 7,8,9,10 as fast as possible
@@ -116,7 +128,7 @@
 //! ```
 //!
 //! then timewarp will capture the before and after versions of components when doing a rollback,
-//! and put it into a [`TimewarpCorrection`] component for your game to examine.
+//! and put it into a [`TimewarpCorrection<Position>`] component for your game to examine.
 //! Typically this would be useful for some visual smoothing - you might gradually blend over the
 //! error distance with your sprite, even though the underlying physical simulation snapped correct.
 //!
@@ -165,6 +177,9 @@
 //! - Littered with a variety of debug logging, set your log level accordingly
 //! - Unoptimized: clones components each frame without checking if they've changed.
 //! - Doesn't rollback resources or other things, just (registered) component data.
+//! - Registered components must impl `PartialEq`
+//! - I'm using a patched version of `bevy_xpbd` at the mo, to make `Collider` impl `PartialEq`
+//!   (PRs sent..)
 //!
 pub(crate) mod components;
 mod error;
@@ -218,7 +233,10 @@ pub struct TimewarpPlugin {
 impl TimewarpPlugin {
     pub fn new(rollback_window: FrameNumber, after_set: impl SystemSet) -> Self {
         Self {
-            config: TimewarpConfig { rollback_window },
+            config: TimewarpConfig {
+                rollback_window,
+                ..default()
+            },
             after_set: Box::new(after_set),
         }
     }
