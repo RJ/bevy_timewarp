@@ -202,7 +202,10 @@ pub mod prelude {
     pub use crate::TimewarpSet;
 }
 
-use bevy::{ecs::schedule::BoxedSystemSet, prelude::*};
+use bevy::{
+    ecs::schedule::{BoxedSystemSet, ScheduleLabel},
+    prelude::*,
+};
 use prelude::*;
 
 /// bevy_timewarp's systems run in these three sets, which get configured to run
@@ -226,30 +229,24 @@ pub(crate) enum TimewarpSetMarkers {
 
 pub struct TimewarpPlugin {
     config: TimewarpConfig,
-    /// set containing game logic, after which the rollback systems will run
-    after_set: BoxedSystemSet,
 }
 
 impl TimewarpPlugin {
-    pub fn new(rollback_window: FrameNumber, after_set: impl SystemSet) -> Self {
+    pub fn new(timewarp_config: TimewarpConfig) -> Self {
         Self {
-            config: TimewarpConfig {
-                rollback_window,
-                ..default()
-            },
-            after_set: Box::new(after_set),
+            config: timewarp_config,
         }
     }
 }
 
 impl Plugin for TimewarpPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(self.config)
+        app.insert_resource(self.config.clone())
             // RollbackRequest events are drained manually in `consolidate_rollback_requests`
             .init_resource::<Events<RollbackRequest>>()
             .insert_resource(RollbackStats::default())
             .configure_sets(
-                FixedUpdate,
+                self.config.schedule(),
                 (
                     TimewarpSetMarkers::RollbackStartMarker,
                     // --- APPLY_DEFERRED ---
@@ -285,9 +282,9 @@ impl Plugin for TimewarpPlugin {
             // assume this is because bevy's API is in transitional phase in this regards..
             // https://github.com/bevyengine/bevy/pull/9247
             .configure_set(
-                FixedUpdate,
-                self.after_set
-                    .dyn_clone()
+                self.config.schedule(),
+                self.config
+                    .after_set()
                     .before(TimewarpSetMarkers::RollbackStartMarker),
             )
             .insert_resource(FixedTime::new_from_secs(1.0 / 60.0))
@@ -295,7 +292,7 @@ impl Plugin for TimewarpPlugin {
             // apply_deferred between rollback sets
             // needed because rollback logic can insert/remove components and the Rollback resource.
             .add_systems(
-                FixedUpdate,
+                self.config.schedule(),
                 (
                     apply_deferred
                         .after(TimewarpSetMarkers::RollbackStartMarker)
@@ -309,20 +306,20 @@ impl Plugin for TimewarpPlugin {
                 ),
             )
             .add_systems(
-                FixedUpdate,
+                self.config.schedule(),
                 systems::add_frame_to_freshly_added_despawn_markers
                     .in_set(TimewarpSet::RecordComponentValues),
             )
             .add_systems(
-                FixedUpdate,
+                self.config.schedule(),
                 systems::check_for_rollback_completion.in_set(TimewarpSet::RollbackUnderwayGlobal),
             )
             .add_systems(
-                FixedUpdate,
+                self.config.schedule(),
                 systems::rollback_initiated.in_set(TimewarpSet::RollbackInitiated),
             )
             .add_systems(
-                FixedUpdate,
+                self.config.schedule(),
                 (
                     systems::consolidate_rollback_requests,
                     systems::despawn_entities_with_elapsed_despawn_marker,

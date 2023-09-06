@@ -1,8 +1,11 @@
 use crate::FrameNumber;
-use bevy::prelude::*;
+use bevy::{
+    ecs::schedule::{BoxedSystemSet, ScheduleLabel},
+    prelude::*,
+};
 use std::{ops::Range, time::Duration};
 
-#[derive(Resource, Debug, Copy, Clone, Default)]
+#[derive(Resource, Debug, Clone)]
 pub struct TimewarpConfig {
     /// how many frames of old component values should we buffer?
     /// can't roll back any further than this. will depend on network lag and game mechanics.
@@ -11,6 +14,50 @@ pub struct TimewarpConfig {
     /// the stored predicted value matches the server snapshot.
     /// meant as a worst-case scenario for checking performance really.
     pub force_rollback_always: bool,
+    /// schedule in which our `after_set` and rollback systems run, defaults to FixedUpdate
+    pub schedule: Box<dyn ScheduleLabel>,
+    /// set containing game logic, after which the rollback systems will run
+    pub after_set: BoxedSystemSet,
+}
+
+impl TimewarpConfig {
+    /// Makes a new timewarp config, with defaults:
+    /// rollback_window: 30
+    /// forced_rollback: false
+    /// schedule: FixedUpdate
+    pub fn new(after_set: impl SystemSet) -> Self {
+        Self {
+            after_set: Box::new(after_set),
+            // and defaults, override with builder fns:
+            rollback_window: 30,
+            force_rollback_always: false,
+            schedule: Box::new(FixedUpdate),
+        }
+    }
+    pub fn set_schedule(mut self, schedule: impl ScheduleLabel) -> Self {
+        self.schedule = Box::new(schedule);
+        self
+    }
+    pub fn set_forced_rollback(mut self, enabled: bool) -> Self {
+        self.force_rollback_always = enabled;
+        self
+    }
+    pub fn set_rollback_window(mut self, num_frames: FrameNumber) -> Self {
+        self.rollback_window = num_frames;
+        self
+    }
+    pub fn after_set(&self) -> BoxedSystemSet {
+        self.after_set.as_ref().dyn_clone()
+    }
+    pub fn forced_rollback(&self) -> bool {
+        self.force_rollback_always
+    }
+    pub fn schedule(&self) -> Box<dyn ScheduleLabel> {
+        self.schedule.dyn_clone()
+    }
+    pub fn rollback_window(&self) -> FrameNumber {
+        self.rollback_window
+    }
 }
 
 /// Updated whenever we perform a rollback

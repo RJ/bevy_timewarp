@@ -40,6 +40,12 @@ impl TimewarpTraits for App {
     fn register_rollback_with_options<T: TimewarpComponent, const CORRECTION_LOGGING: bool>(
         &mut self,
     ) -> &mut Self {
+        let config = self
+            .world
+            .get_resource::<TimewarpConfig>()
+            .expect("TimewarpConfig resource expected");
+        let schedule = config.schedule();
+
         self
             // we want to record frame values even if we're about to rollback -
             // we need values pre-rb to diff against post-rb versions.
@@ -48,7 +54,7 @@ impl TimewarpTraits for App {
             // * Runs always
             // ---
             .add_systems(
-                FixedUpdate,
+                schedule.clone(),
                 (
                     add_timewarp_buffer_components::<T, CORRECTION_LOGGING>,
                     // Recording component births. this does the Added<> query, and bails if in rollback
@@ -67,9 +73,8 @@ impl TimewarpTraits for App {
             // * run_if(resource_exists(Rollback))
             // ---
             .add_systems(
-                FixedUpdate,
+                schedule.clone(),
                 (
-                    // apply_snapshot_to_component_if_available::<T>,
                     rekill_components_during_rollback::<T>,
                     rebirth_components_during_rollback::<T>,
                     clear_removed_components_queue::<T>
@@ -82,7 +87,7 @@ impl TimewarpTraits for App {
             // * run_if(resource_added(Rollback))
             // ---
             .add_systems(
-                FixedUpdate,
+                schedule.clone(),
                 rollback_component::<T>
                     .after(rollback_initiated)
                     .in_set(TimewarpSet::RollbackInitiated),
@@ -92,10 +97,9 @@ impl TimewarpTraits for App {
             // * run_if(not(resource_exists(Rollback)))
             // ---
             .add_systems(
-                FixedUpdate,
+                schedule.clone(),
                 (
                     record_component_death::<T>,
-                    // apply_snapshot_to_component_if_available::<T>,
                     trigger_rollback_when_snapshot_added::<T>,
                 )
                     .before(consolidate_rollback_requests)

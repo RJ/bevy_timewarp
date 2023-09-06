@@ -22,12 +22,12 @@ pub struct EntName {
 }
 
 pub fn setup_test_app() -> App {
+    let tw_config = TimewarpConfig::new(TimewarpTestSets::GameLogic)
+        .set_rollback_window(TEST_ROLLBACK_WINDOW)
+        .set_schedule(FixedUpdate);
     let mut app = App::new();
     app.add_plugins(bevy::log::LogPlugin::default());
-    app.add_plugins(TimewarpPlugin::new(
-        TEST_ROLLBACK_WINDOW,
-        TimewarpTestSets::GameLogic,
-    ));
+    app.add_plugins(TimewarpPlugin::new(tw_config.clone()));
     app.add_plugins(bevy::time::TimePlugin::default());
     app.insert_resource(FixedTime::new(TIMESTEP));
     app

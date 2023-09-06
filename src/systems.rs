@@ -139,8 +139,8 @@ pub(crate) fn record_component_history<T: TimewarpComponent>(
                     if let Some(old_val) = comp_hist.at_frame(game_clock.frame()) {
                         if *old_val != *comp {
                             warn!(
-                                "Generating Correction for {entity:?} old:{:?} new{:?}",
-                                old_val, comp
+                                "Generating Correction for {entity:?}", //old:{:?} new{:?}",
+                                                                        // old_val, comp
                             );
                             if let Some(mut correction) = opt_correction {
                                 correction.before = old_val.clone();
@@ -246,6 +246,8 @@ pub(crate) fn trigger_rollback_when_snapshot_added<T: TimewarpComponent>(
             continue;
         }
         // if this snapshot is ahead of where we want the entity to be, it's useless to rollback
+        // this happens for clients with almost no lag. they receive snapshots for frame N+1 while on frame N.
+        //
         // TODO test if we get a snapshot for the frame we just processed.. what if snap_frame == game_clock.frame()
         // does the value still get applied?
         if snap_frame > game_clock.frame() {
@@ -342,7 +344,17 @@ pub(crate) fn rollback_initiated(
     mut rb: ResMut<Rollback>,
     mut fx: ResMut<FixedTime>,
     mut rb_stats: ResMut<RollbackStats>,
+    timewarp_config: Res<TimewarpConfig>,
 ) {
+    // if we're trying to roll back further than our configured rollback window,
+    // all sorts of things will fail spectacularly, so i'm just going to panic for now.
+    // i think the way to handle this is in the game, if you get an update from the past older
+    // than the window that you can't afford to ignore, like a reliable spawn message, then
+    // perhaps modify the spawn frame to the oldest allowable frame within the window,
+    // and rely on snapshots to sort you out.
+    if rb.range.end - rb.range.start > timewarp_config.rollback_window {
+        panic!("Attempted to rollback further than rollback_window: {rb:?}");
+    }
     // save original period for restoration after rollback completion
     rb.original_period = Some(fx.period);
     rb_stats.num_rollbacks += 1;
