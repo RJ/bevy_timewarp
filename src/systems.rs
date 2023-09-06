@@ -238,6 +238,7 @@ pub(crate) fn trigger_rollback_when_snapshot_added<T: TimewarpComponent>(
     >,
     game_clock: Res<GameClock>,
     mut rb_ev: ResMut<Events<RollbackRequest>>,
+    config: Res<TimewarpConfig>,
 ) {
     for (entity, server_snapshot, mut comp_hist, mut tw_status) in q.iter_mut() {
         let snap_frame = server_snapshot.values.newest_frame();
@@ -268,7 +269,7 @@ pub(crate) fn trigger_rollback_when_snapshot_added<T: TimewarpComponent>(
         // check if our historical value for the snap_frame is the same as what snapshot says
         // because if they match, we predicted successfully, and there's no need to rollback.
         if let Some(stored_comp_val) = comp_hist.at_frame(snap_frame) {
-            if *stored_comp_val == *comp_from_snapshot {
+            if !config.forced_rollback() && *stored_comp_val == *comp_from_snapshot {
                 // a correct prediction, no need to rollback. hooray!
                 // info!("skipping rollback 🎖️ {stored_comp_val:?}");
                 continue;
