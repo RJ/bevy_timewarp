@@ -63,8 +63,7 @@ impl TimewarpTraits for App {
                     record_component_history::<T>,
                     insert_components_at_prior_frames::<T>,
                     remove_components_from_despawning_entities::<T>
-                        .after(record_component_history::<T>)
-                        .after(add_frame_to_freshly_added_despawn_markers),
+                        .after(record_component_history::<T>),
                 )
                     .in_set(TimewarpSet::RecordComponentValues),
             )

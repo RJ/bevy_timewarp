@@ -509,22 +509,13 @@ pub(crate) fn check_for_rollback_completion(
     }
     // we keep track of the previous rollback mainly for integration tests
     commands.insert_resource(PreviousRollback(rb.as_ref().clone()));
-    debug!("🛼🛼 Rollback complete. {:?}, resetting period", rb);
+    debug!(
+        "🛼🛼 Rollback complete. {:?}, frames: {}",
+        rb,
+        rb.range.end - rb.range.start
+    );
     fx.period = rb.original_period.unwrap();
     commands.remove_resource::<Rollback>();
-}
-
-/// despawn markers often added using DespawnMarker::new() for convenience, we fill them
-/// with the current frame here.
-pub(crate) fn add_frame_to_freshly_added_despawn_markers(
-    mut q: Query<&mut DespawnMarker, Added<DespawnMarker>>,
-    game_clock: Res<GameClock>,
-) {
-    for mut despawn_marker in q.iter_mut() {
-        if despawn_marker.0.is_none() {
-            despawn_marker.0 = Some(game_clock.frame());
-        }
-    }
 }
 
 /// despawn marker means remove all useful components, pending actual despawn after
@@ -545,13 +536,18 @@ pub(crate) fn remove_components_from_despawning_entities<T: TimewarpComponent>(
 }
 
 /// Once a [`DespawnMarker`] has been around for `rollback_frames`, do the actual despawn.
+/// also for new DespawnMarkers that don't have a frame yet, add one.
 pub(crate) fn despawn_entities_with_elapsed_despawn_marker(
-    q: Query<(Entity, &DespawnMarker)>,
+    mut q: Query<(Entity, &mut DespawnMarker)>,
     mut commands: Commands,
     game_clock: Res<GameClock>,
     timewarp_config: Res<TimewarpConfig>,
 ) {
-    for (entity, marker) in q.iter() {
+    for (entity, mut marker) in q.iter_mut() {
+        if marker.0.is_none() {
+            marker.0 = Some(game_clock.frame());
+            continue;
+        }
         if (marker.0.expect("Despawn marker should have a frame!")
             + timewarp_config.rollback_window)
             == game_clock.frame()

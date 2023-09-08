@@ -307,11 +307,6 @@ impl Plugin for TimewarpPlugin {
             )
             .add_systems(
                 self.config.schedule(),
-                systems::add_frame_to_freshly_added_despawn_markers
-                    .in_set(TimewarpSet::RecordComponentValues),
-            )
-            .add_systems(
-                self.config.schedule(),
                 systems::check_for_rollback_completion.in_set(TimewarpSet::RollbackUnderwayGlobal),
             )
             .add_systems(
