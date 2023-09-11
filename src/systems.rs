@@ -540,18 +540,18 @@ pub(crate) fn check_for_rollback_completion(
 /// despawn marker means remove all useful components, pending actual despawn after
 /// ROLLBACK_WINDOW frames have elapsed.
 pub(crate) fn remove_components_from_despawning_entities<T: TimewarpComponent>(
-    mut q: Query<(Entity, &mut ComponentHistory<T>), (Added<DespawnMarker>, With<T>)>,
+    mut q: Query<Entity, (Added<DespawnMarker>, With<T>)>,
     mut commands: Commands,
-    game_clock: Res<GameClock>,
 ) {
-    for (entity, mut ct) in q.iter_mut() {
+    for entity in q.iter_mut() {
         debug!(
             "doing despawn marker component removal for {entity:?} / {:?}",
             std::any::type_name::<T>()
         );
         // record_component_death looks at RemovedComponents and will catch this, and
         // register the death (ie, comphist.report_death_at_frame)
-        commands.entity(entity).remove::<T>();
+        commands.entity(entity).remove::<T>().despawn_descendants();
+        // (also despawn any children, which in my game means the mesh/visual bits)
     }
 }
 

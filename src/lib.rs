@@ -202,10 +202,7 @@ pub mod prelude {
     pub use crate::TimewarpSet;
 }
 
-use bevy::{
-    ecs::schedule::{BoxedSystemSet, ScheduleLabel},
-    prelude::*,
-};
+use bevy::prelude::*;
 use prelude::*;
 
 /// bevy_timewarp's systems run in these three sets, which get configured to run
