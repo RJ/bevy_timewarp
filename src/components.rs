@@ -129,10 +129,30 @@ impl<T: TimewarpComponent> ComponentHistory<T> {
     }
     pub fn report_birth_at_frame(&mut self, frame: FrameNumber) {
         debug!("component birth @ {frame} {:?}", std::any::type_name::<T>());
+        assert!(
+            !self.alive_at_frame(frame),
+            "Can't report birth of component already alive"
+        );
         self.alive_ranges.push((frame, None));
     }
     pub fn report_death_at_frame(&mut self, frame: FrameNumber) {
-        debug!("component death @ {frame} {:?}", std::any::type_name::<T>());
+        // currently after rollback we get (harmless?) erroneous RemovedComponent<> reports
+        // so we just supress here for now.
+        //
+        // need to consider whether it's worth wiping alive_ranges on rolling back,
+        // and having them repopulate during fast-fwd.
+        if !self.alive_at_frame(frame) {
+            return;
+        }
+        debug!(
+            "component death @ {frame} {:?} {:?}",
+            std::any::type_name::<T>(),
+            self.alive_ranges
+        );
+        assert!(
+            self.alive_at_frame(frame),
+            "Can't report death of component not alive"
+        );
         self.alive_ranges.last_mut().unwrap().1 = Some(frame);
     }
 }

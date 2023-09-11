@@ -114,6 +114,14 @@ pub(crate) fn record_component_birth<T: TimewarpComponent>(
             game_clock.frame(),
             std::any::type_name::<T>()
         );
+        // if an entity was created with InsertComponentAtPastFrame it will have its birth frame recorded
+        // but this system won't catch it via Added<> until the next frame, which we need to supress.
+        // an alternative solution is to force insert_components_at_prior_frames to run before this,
+        // with an apply_deferred, but that seemed worse. systems run in parallel at the mo.
+        if ct.alive_ranges.first() == Some(&(game_clock.frame() - 1, None)) {
+            // this comp is alive and born last frame: skip registering the birth.
+            return;
+        }
         ct.report_birth_at_frame(game_clock.frame());
     }
 }
@@ -155,7 +163,10 @@ pub(crate) fn record_component_history<T: TimewarpComponent>(
                             }
                         }
                     } else {
-                        warn!("End of rb range, but no existing comp to correct");
+                        // trace!("End of rb range, but no existing comp to correct");
+                        // this is normal in the case of spawning a new entity in the past,
+                        // like a bullet. it was never simulated for the current frame yet, so
+                        // it's expected that there wasn't an existing comp history val to replace.
                     }
                 }
             }
@@ -170,7 +181,10 @@ pub(crate) fn record_component_history<T: TimewarpComponent>(
 /// InsertComponentAtFrame::<Shield>::new(frame, shield_component);
 /// and this system handles things.
 /// not triggering rollbacks here, that will happen if we add or change SS.
-pub(crate) fn insert_components_at_prior_frames<T: TimewarpComponent>(
+pub(crate) fn insert_components_at_prior_frames<
+    T: TimewarpComponent,
+    const CORRECTION_LOGGING: bool,
+>(
     mut q: Query<
         (
             Entity,
@@ -203,10 +217,13 @@ pub(crate) fn insert_components_at_prior_frames<T: TimewarpComponent>(
             ch.report_birth_at_frame(icaf.frame);
             trace!("Inserting component at past frame for existing ComponentHistory");
         } else {
-            let ch = ComponentHistory::<T>::with_capacity(
+            let mut ch = ComponentHistory::<T>::with_capacity(
                 timewarp_config.rollback_window as usize,
                 icaf.frame,
             );
+            if CORRECTION_LOGGING {
+                ch.enable_correction_logging();
+            }
             ent_cmd.insert(ch);
             trace!("Inserting component at past frame by inserting new ComponentHistory");
         }
@@ -488,7 +505,9 @@ pub(crate) fn rollback_component<T: TimewarpComponent>(
             } else {
                 // we chose to rollback to this frame, we would expect there to be data here..
                 error!(
-                    "{str}\n- Need to revive/update component, but not in history @ {rollback_frame}. comp_hist range: {:?}", comp_hist.values.current_range()
+                    "{str}\n- Need to revive/update component, but not in history @ {rollback_frame}. comp_hist range: {:?} alive_ranges: {:?}",
+                     comp_hist.values.current_range(),
+                     comp_hist.alive_ranges,
                 );
             }
         }
@@ -530,7 +549,8 @@ pub(crate) fn remove_components_from_despawning_entities<T: TimewarpComponent>(
             "doing despawn marker component removal for {entity:?} / {:?}",
             std::any::type_name::<T>()
         );
-        ct.report_death_at_frame(game_clock.frame());
+        // record_component_death looks at RemovedComponents and will catch this, and
+        // register the death (ie, comphist.report_death_at_frame)
         commands.entity(entity).remove::<T>();
     }
 }

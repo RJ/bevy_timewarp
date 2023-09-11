@@ -59,9 +59,9 @@ impl TimewarpTraits for App {
                     add_timewarp_buffer_components::<T, CORRECTION_LOGGING>,
                     // Recording component births. this does the Added<> query, and bails if in rollback
                     // so that the Added query is refreshed.
-                    record_component_birth::<T>,
                     record_component_history::<T>,
-                    insert_components_at_prior_frames::<T>,
+                    insert_components_at_prior_frames::<T, CORRECTION_LOGGING>,
+                    record_component_birth::<T>,
                     remove_components_from_despawning_entities::<T>
                         .after(record_component_history::<T>),
                 )
