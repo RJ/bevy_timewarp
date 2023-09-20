@@ -1,5 +1,7 @@
 use super::*;
 use bevy::prelude::*;
+use std::fmt;
+use std::ops::Deref;
 
 #[derive(Resource, Default)]
 pub struct GameClock {
@@ -23,5 +25,24 @@ impl GameClock {
     }
     pub fn set(&mut self, frame: FrameNumber) {
         self.frame = frame;
+    }
+}
+
+impl Deref for GameClock {
+    type Target = FrameNumber;
+    fn deref(&self) -> &Self::Target {
+        &self.frame
+    }
+}
+
+impl fmt::Debug for GameClock {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "[[f={}]]", self.frame)
+    }
+}
+
+impl fmt::Display for GameClock {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "[f={}]", self.frame)
     }
 }
