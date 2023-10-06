@@ -22,10 +22,6 @@ pub fn deserialize_rotation_timewarp(
     } else {
         entity.insert(comp);
     }
-    if let Some(mut sync_status) = entity.get_mut::<SyncStatus>() {
-        sync_status.last_snapshot_rot = Some(comp);
-        sync_status.last_update_frame = tick.get();
-    }
     Ok(())
 }
 
