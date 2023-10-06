@@ -58,6 +58,13 @@ impl TimewarpConfig {
     pub fn rollback_window(&self) -> FrameNumber {
         self.rollback_window
     }
+    pub fn is_within_rollback_window(
+        &self,
+        current_frame: FrameNumber,
+        target_frame: FrameNumber,
+    ) -> bool {
+        target_frame > current_frame - self.rollback_window
+    }
 }
 
 /// Updated whenever we perform a rollback
