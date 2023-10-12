@@ -209,18 +209,16 @@ use prelude::*;
 /// after the main game logic (the set for which is provided in the plugin setup)
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TimewarpSet {
+    /// left empty - exists as marker for interleaving apply_deferreds
+    RollbackStartMarker,
+    BlueprintUnwrapping,
+    BlueprintAssembly,
     RecordComponentValues,
     RollbackUnderwayComponents,
     RollbackUnderwayGlobal,
     RollbackInitiated,
     NoRollback,
-}
-
-#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum TimewarpSetMarkers {
-    /// remains empty - exists as marker for interleaving apply_deferreds
-    RollbackStartMarker,
-    /// remains empty - exists as marker for interleaving apply_deferreds
+    /// left empty - exists as marker for interleaving apply_deferreds
     RollbackEndMarker,
 }
 
@@ -245,7 +243,16 @@ impl Plugin for TimewarpPlugin {
             .configure_sets(
                 self.config.schedule(),
                 (
-                    TimewarpSetMarkers::RollbackStartMarker,
+                    TimewarpSet::RollbackStartMarker,
+                    // Runs in normal frames       : No
+                    // Runs when rollback initiated: Yes
+                    // Runs during ongoing rollback: Yes
+                    TimewarpSet::BlueprintUnwrapping.run_if(resource_exists::<Rollback>()),
+                    // --- APPLY_DEFERRED ---
+                    // Runs in normal frames       : No
+                    // Runs when rollback initiated: Yes
+                    // Runs during ongoing rollback: Yes
+                    TimewarpSet::BlueprintAssembly.run_if(resource_exists::<Rollback>()),
                     // --- APPLY_DEFERRED ---
                     // Runs in normal frames       : Yes
                     // Runs when rollback initiated: Yes
@@ -270,7 +277,7 @@ impl Plugin for TimewarpPlugin {
                     // Runs when rollback initiated: Yes
                     // Runs during ongoing rollback: No
                     TimewarpSet::RollbackInitiated.run_if(resource_added::<Rollback>()),
-                    TimewarpSetMarkers::RollbackEndMarker,
+                    TimewarpSet::RollbackEndMarker,
                 )
                     .chain(),
             )
@@ -282,7 +289,7 @@ impl Plugin for TimewarpPlugin {
                 self.config.schedule(),
                 self.config
                     .after_set()
-                    .before(TimewarpSetMarkers::RollbackStartMarker),
+                    .before(TimewarpSet::RollbackStartMarker),
             )
             .insert_resource(FixedTime::new_from_secs(1.0 / 60.0))
             .insert_resource(GameClock::new())
@@ -292,7 +299,10 @@ impl Plugin for TimewarpPlugin {
                 self.config.schedule(),
                 (
                     apply_deferred
-                        .after(TimewarpSetMarkers::RollbackStartMarker)
+                        .after(TimewarpSet::BlueprintUnwrapping)
+                        .before(TimewarpSet::BlueprintAssembly),
+                    apply_deferred
+                        .after(TimewarpSet::BlueprintAssembly)
                         .before(TimewarpSet::RecordComponentValues),
                     apply_deferred
                         .after(TimewarpSet::RecordComponentValues)
@@ -301,6 +311,10 @@ impl Plugin for TimewarpPlugin {
                         .after(TimewarpSet::NoRollback)
                         .before(TimewarpSet::RollbackInitiated),
                 ),
+            )
+            .add_systems(
+                self.config.schedule(),
+                systems::rollback_sets_banner.in_set(TimewarpSet::RollbackStartMarker),
             )
             .add_systems(
                 self.config.schedule(),

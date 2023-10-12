@@ -28,6 +28,30 @@ pub(crate) fn consolidate_rollback_requests(
     commands.insert_resource(Rollback::new(rb_frame, game_clock.frame()));
 }
 
+/// footgun protection - in case your clock ticking fn isn't running properly, this avoids
+/// timewarp rolling back if the clock won't advance, since that would be an infinite loop.
+pub(crate) fn rollback_sets_banner(
+    game_clock: Res<GameClock>,
+    opt_rb: Option<Res<Rollback>>,
+    mut prev_frame: Local<u32>,
+) {
+    trace!("🐷 START OF ROLLBACK SETS {game_clock:?} rb:{opt_rb:?}");
+    if **game_clock == 0 && opt_rb.is_some() {
+        panic!(
+            "⛔️ GameClock is on 0, but timewarp wants to rollback. {game_clock:?} rb:{:?}",
+            opt_rb.unwrap().clone()
+        );
+    }
+    if let Some(rb) = opt_rb {
+        if *prev_frame == **game_clock && rb.range.start == *prev_frame {
+            panic!(
+            "⛔️ GameClock not advancing properly, and timewarp wants to rollback. {game_clock:?} rb:{rb:?}"
+            );
+        }
+    }
+    *prev_frame = **game_clock;
+}
+
 /// wipes RemovedComponents<T> queue for component T.
 /// useful during rollback, because we don't react to removals that are part of resimulating.
 pub(crate) fn clear_removed_components_queue<T: Component>(
@@ -146,7 +170,7 @@ pub(crate) fn record_component_history<T: TimewarpComponent>(
                 if rb.range.end == game_clock.frame() {
                     if let Some(old_val) = comp_hist.at_frame(game_clock.frame()) {
                         if *old_val != *comp {
-                            warn!(
+                            debug!(
                                 "Generating Correction for {entity:?}", //old:{:?} new{:?}",
                                                                         // old_val, comp
                             );
@@ -177,6 +201,34 @@ pub(crate) fn record_component_history<T: TimewarpComponent>(
     }
 }
 
+/// Blueprint components stay wrapped up until their target frame, then we unwrap them
+/// so the assembly systems can decorate them with various other components at that frame.
+pub(crate) fn unwrap_blueprints_at_target_frame<T: TimewarpComponent>(
+    q: Query<(Entity, &AssembleBlueprintAtFrame<T>)>,
+    mut commands: Commands,
+    game_clock: Res<GameClock>,
+    rb: Res<Rollback>,
+) {
+    for (e, abaf) in q.iter() {
+        if abaf.frame != **game_clock {
+            info!(
+                "Not unwrapping, frame={} @ {game_clock:?} {}",
+                abaf.frame,
+                std::any::type_name::<T>()
+            );
+            continue;
+        }
+        info!(
+            "🎁 Unwrapping {abaf:?} @ {game_clock:?} {rb:?} {}",
+            std::any::type_name::<T>()
+        );
+        commands
+            .entity(e)
+            .insert(abaf.component.clone())
+            .remove::<AssembleBlueprintAtFrame<T>>();
+    }
+}
+
 /// when you need to insert a component at a previous frame, you wrap it up like:
 /// InsertComponentAtFrame::<Shield>::new(frame, shield_component);
 /// and this system handles things.
@@ -199,9 +251,10 @@ pub(crate) fn insert_components_at_prior_frames<
     >,
     mut commands: Commands,
     timewarp_config: Res<TimewarpConfig>,
+    game_clock: Res<GameClock>,
 ) {
     for (entity, icaf, opt_ch, opt_ss, opt_tw_status) in q.iter_mut() {
-        // warn!("{icaf:?}");
+        debug!("f={game_clock:?} {entity:?} {icaf:?}");
         let mut ent_cmd = commands.entity(entity);
         ent_cmd.remove::<InsertComponentAtFrame<T>>();
         if let Some(mut tw_status) = opt_tw_status {
@@ -239,6 +292,31 @@ pub(crate) fn insert_components_at_prior_frames<
             ss.insert(icaf.frame, icaf.component.clone());
             ent_cmd.insert(ss);
         }
+    }
+}
+
+pub(crate) fn trigger_rollback_when_blueprint_added<T: TimewarpComponent>(
+    q: Query<&AssembleBlueprintAtFrame<T>, Added<AssembleBlueprintAtFrame<T>>>,
+    game_clock: Res<GameClock>,
+    mut rb_ev: ResMut<Events<RollbackRequest>>,
+) {
+    for abaf in q.iter() {
+        let snap_frame = abaf.frame;
+        if snap_frame > game_clock.frame() {
+            warn!("{game_clock:?} Assemble BLueprint frame {snap_frame} > f - {abaf:?}");
+            continue;
+        }
+        // trigger a rollback
+        //
+        // Although this is the only system that asks for rollbacks, we request them
+        // by writing to an Event<> and consolidating afterwards.
+        // It's possible different <T: Component> generic versions of this function
+        // will want to rollback to different frames, and we can't have them trampling
+        // over eachother by just inserting the Rollback resoruce directly.
+        info!(
+            "{game_clock:?} TRIGGERING ROLLBACK to {snap_frame} due to added blueprint: {abaf:?}"
+        );
+        rb_ev.send(RollbackRequest(snap_frame.saturating_sub(1)));
     }
 }
 
@@ -371,7 +449,10 @@ pub(crate) fn rollback_initiated(
     // perhaps modify the spawn frame to the oldest allowable frame within the window,
     // and rely on snapshots to sort you out.
     if rb.range.end - rb.range.start > timewarp_config.rollback_window {
-        panic!("Attempted to rollback further than rollback_window: {rb:?}");
+        panic!(
+            "Attempted to rollback further than rollback_window: {rb:?} @ {:?}",
+            game_clock.frame()
+        );
     }
     // save original period for restoration after rollback completion
     rb.original_period = Some(fx.period);
@@ -413,8 +494,9 @@ pub(crate) fn rebirth_components_during_rollback<T: TimewarpComponent>(
             commands.entity(entity).insert(comp_val.clone());
         } else {
             trace!(
-                "comp not alive at this frame for {entity:?} {:?}",
-                comp_history.alive_ranges
+                "comp not alive at {game_clock:?} for {entity:?} {:?} {}",
+                comp_history.alive_ranges,
+                std::any::type_name::<T>(),
             );
         }
     }
@@ -456,7 +538,6 @@ pub(crate) fn rollback_component<T: TimewarpComponent>(
     game_clock: Res<GameClock>,
 ) {
     for (entity, opt_comp, comp_hist) in q.iter_mut() {
-        let verbose = false;
         let rollback_frame = rb.range.start;
         assert_eq!(
             game_clock.frame(),
@@ -476,30 +557,25 @@ pub(crate) fn rollback_component<T: TimewarpComponent>(
         }
         if !comp_hist.alive_at_frame(rollback_frame) && opt_comp.is_some() {
             // not alive then, alive now = remove the component
-            if verbose {
-                info!("{str}\n- Not alive in past, but alive in pressent = remove component. alive ranges = {:?}", comp_hist.alive_ranges);
-            }
+            trace!("{str}\n- Not alive in past, but alive in pressent = remove component. alive ranges = {:?}", comp_hist.alive_ranges);
             commands.entity(entity).remove::<T>();
             continue;
         }
         if comp_hist.alive_at_frame(rollback_frame) {
             if let Some(component) = comp_hist.at_frame(rollback_frame) {
                 if let Some(mut current_component) = opt_comp {
-                    if verbose {
-                        info!(
-                            "{str}\n- Injecting older data by assigning, {:?} ----> {:?}",
-                            Some(current_component.clone()),
-                            component
-                        );
-                    }
+                    trace!(
+                        "{str}\n- Injecting older data by assigning, {:?} ----> {:?}",
+                        Some(current_component.clone()),
+                        component
+                    );
                     *current_component = component.clone();
                 } else {
-                    if verbose {
-                        info!(
-                            "{str}\n- Injecting older data by reinserting comp, {:?} ----> {:?}",
-                            opt_comp, component
-                        );
-                    }
+                    trace!(
+                        "{str}\n- Injecting older data by reinserting comp, {:?} ----> {:?}",
+                        opt_comp,
+                        component
+                    );
                     commands.entity(entity).insert(component.clone());
                 }
             } else {

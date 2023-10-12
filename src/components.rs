@@ -47,6 +47,18 @@ impl<T: TimewarpComponent> InsertComponentAtFrame<T> {
     }
 }
 
+/// For assembling a blueprint in the past - testing.
+#[derive(Component, Debug)]
+pub struct AssembleBlueprintAtFrame<T: TimewarpComponent> {
+    pub component: T,
+    pub frame: FrameNumber,
+}
+impl<T: TimewarpComponent> AssembleBlueprintAtFrame<T> {
+    pub fn new(frame: FrameNumber, component: T) -> Self {
+        Self { component, frame }
+    }
+}
+
 /// entities with components that were registered with error correction logging will receive
 /// one of these components, updated with before/after values when a simulation correction
 /// resulting from a rollback and resimulate causes a snap.

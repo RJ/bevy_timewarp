@@ -28,6 +28,7 @@ pub trait TimewarpTraits {
     fn register_rollback_with_options<T: TimewarpComponent, const CORRECTION_LOGGING: bool>(
         &mut self,
     ) -> &mut Self;
+    fn register_blueprint<T: TimewarpComponent>(&mut self) -> &mut Self;
 }
 
 impl TimewarpTraits for App {
@@ -36,6 +37,26 @@ impl TimewarpTraits for App {
     }
     fn register_rollback_with_correction_logging<T: TimewarpComponent>(&mut self) -> &mut Self {
         self.register_rollback_with_options::<T, true>()
+    }
+    fn register_blueprint<T: TimewarpComponent>(&mut self) -> &mut Self {
+        info!("REGISTER BLUEPRINT {}", std::any::type_name::<T>());
+        let config = self
+            .world
+            .get_resource::<TimewarpConfig>()
+            .expect("TimewarpConfig resource expected");
+        let schedule = config.schedule();
+
+        self.add_systems(
+            schedule.clone(),
+            trigger_rollback_when_blueprint_added::<T>
+                .before(consolidate_rollback_requests)
+                .in_set(TimewarpSet::NoRollback),
+        )
+        // this unwraps from the AssembleBlueprintAtFrame wrapper if the wrapper frame = current frame
+        .add_systems(
+            schedule.clone(),
+            unwrap_blueprints_at_target_frame::<T>.in_set(TimewarpSet::BlueprintUnwrapping),
+        )
     }
     fn register_rollback_with_options<T: TimewarpComponent, const CORRECTION_LOGGING: bool>(
         &mut self,
@@ -46,63 +67,61 @@ impl TimewarpTraits for App {
             .expect("TimewarpConfig resource expected");
         let schedule = config.schedule();
 
-        self
-            // we want to record frame values even if we're about to rollback -
-            // we need values pre-rb to diff against post-rb versions.
-            // ---
-            // TimewarpSet::RecordComponentValues
-            // * Runs always
-            // ---
-            .add_systems(
-                schedule.clone(),
-                (
-                    add_timewarp_buffer_components::<T, CORRECTION_LOGGING>,
-                    // Recording component births. this does the Added<> query, and bails if in rollback
-                    // so that the Added query is refreshed.
-                    record_component_history::<T>,
-                    insert_components_at_prior_frames::<T, CORRECTION_LOGGING>,
-                    record_component_birth::<T>,
-                    remove_components_from_despawning_entities::<T>
-                        .after(record_component_history::<T>),
-                )
-                    .in_set(TimewarpSet::RecordComponentValues),
+        // we want to record frame values even if we're about to rollback -
+        // we need values pre-rb to diff against post-rb versions.
+        // ---
+        // TimewarpSet::RecordComponentValues
+        // * Runs always
+        // ---
+        self.add_systems(
+            schedule.clone(),
+            (
+                add_timewarp_buffer_components::<T, CORRECTION_LOGGING>,
+                // Recording component births. this does the Added<> query, and bails if in rollback
+                // so that the Added query is refreshed.
+                record_component_history::<T>,
+                insert_components_at_prior_frames::<T, CORRECTION_LOGGING>,
+                record_component_birth::<T>,
+                remove_components_from_despawning_entities::<T>
+                    .after(record_component_history::<T>),
             )
-            // ---
-            // TimewarpSet::RollbackUnderwayComponents
-            // * run_if(resource_exists(Rollback))
-            // ---
-            .add_systems(
-                schedule.clone(),
-                (
-                    rekill_components_during_rollback::<T>,
-                    rebirth_components_during_rollback::<T>,
-                    clear_removed_components_queue::<T>
-                        .after(rekill_components_during_rollback::<T>),
-                )
-                    .in_set(TimewarpSet::RollbackUnderwayComponents),
+                .in_set(TimewarpSet::RecordComponentValues),
+        )
+        // ---
+        // TimewarpSet::RollbackUnderwayComponents
+        // * run_if(resource_exists(Rollback))
+        // ---
+        .add_systems(
+            schedule.clone(),
+            (
+                rekill_components_during_rollback::<T>,
+                rebirth_components_during_rollback::<T>,
+                clear_removed_components_queue::<T>.after(rekill_components_during_rollback::<T>),
             )
-            // ---
-            // TimewarpSet::RollbackInitiated
-            // * run_if(resource_added(Rollback))
-            // ---
-            .add_systems(
-                schedule.clone(),
-                rollback_component::<T>
-                    .after(rollback_initiated)
-                    .in_set(TimewarpSet::RollbackInitiated),
+                .in_set(TimewarpSet::RollbackUnderwayComponents),
+        )
+        // ---
+        // TimewarpSet::RollbackInitiated
+        // * run_if(resource_added(Rollback))
+        // ---
+        .add_systems(
+            schedule.clone(),
+            rollback_component::<T>
+                .after(rollback_initiated)
+                .in_set(TimewarpSet::RollbackInitiated),
+        )
+        // ---
+        // TimewarpSet::NoRollback
+        // * run_if(not(resource_exists(Rollback)))
+        // ---
+        .add_systems(
+            schedule.clone(),
+            (
+                record_component_death::<T>,
+                trigger_rollback_when_snapshot_added::<T>,
             )
-            // ---
-            // TimewarpSet::NoRollback
-            // * run_if(not(resource_exists(Rollback)))
-            // ---
-            .add_systems(
-                schedule.clone(),
-                (
-                    record_component_death::<T>,
-                    trigger_rollback_when_snapshot_added::<T>,
-                )
-                    .before(consolidate_rollback_requests)
-                    .in_set(TimewarpSet::NoRollback),
-            )
+                .before(consolidate_rollback_requests)
+                .in_set(TimewarpSet::NoRollback),
+        )
     }
 }
