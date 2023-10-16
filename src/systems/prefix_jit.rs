@@ -47,16 +47,18 @@ pub(crate) fn apply_jit_icafs<T: TimewarpComponent, const CORRECTION_LOGGING: bo
     timewarp_config: Res<TimewarpConfig>,
 ) {
     for (entity, icaf, opt_ch, opt_ss, opt_tw_status) in q.iter_mut() {
-        assert!(
-            opt_ch.is_some() == opt_ss.is_some() && opt_ss.is_some() == opt_tw_status.is_some()
-        );
+        assert_eq!(opt_ch.is_some(), opt_ss.is_some());
+        let mut ent_cmd = commands.entity(entity);
+
+        if let Some(mut tw_status) = opt_tw_status {
+            tw_status.set_snapped_at(icaf.frame);
+        } else {
+            ent_cmd.insert(TimewarpStatus::new(icaf.frame));
+        }
 
         if let Some(mut ss) = opt_ss {
-            commands
-                .entity(entity)
-                .remove::<InsertComponentAtFrame<T>>();
+            ent_cmd.remove::<InsertComponentAtFrame<T>>();
             ss.insert(icaf.frame, icaf.component.clone());
-            opt_tw_status.unwrap().set_snapped_at(icaf.frame);
         } else {
             let mut ss =
                 ServerSnapshot::<T>::with_capacity(timewarp_config.rollback_window as usize * 60); // TODO yuk
@@ -72,8 +74,7 @@ pub(crate) fn apply_jit_icafs<T: TimewarpComponent, const CORRECTION_LOGGING: bo
 
             let tw_status = TimewarpStatus::new(icaf.frame);
 
-            commands
-                .entity(entity)
+            ent_cmd
                 .remove::<InsertComponentAtFrame<T>>()
                 .insert((ch, ss, tw_status));
         }

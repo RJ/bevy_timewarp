@@ -79,9 +79,10 @@ fn error_correction() {
     // by now, these should be current values
     assert_eq!(app.world.get::<Enemy>(e1).unwrap().health, 6);
 
+    // note for later: after tick 4, E1's health is 6.
     assert_eq!(app.comp_val_at::<Enemy>(e1, 4).unwrap().health, 6);
 
-    // let's pretend during frame 5 we get a message from the server saying that on frame 2, E1
+    // let's pretend between frames 4 and 5 we get a message from the server saying that on frame 2, E1
     // ate a powerup, changing his health to 100.
     // our app's netcode would insert the authoritative (slightly outdated) values into ServerSnapshots.
     // then, the trigger_rollback_when_snapshot_added system would detect that
@@ -120,17 +121,23 @@ fn error_correction() {
     // now the meat of this test - we check that the before/after component values are correct
     // either side of the rollback that just happened on tick 5
     //
-    // NB we actually can't view the pre-rollback comp value @ 5 because within the tick the
-    // rollback runs and replaces it before the end of the tick.
+    // Note: during the last tick, we started the tick having calcualted tick 4 previously.
+    //       then rolled back applying new values, resimulated 3 & 4, then simulated 5 for the first time.
+    //
+    // so we can't give a diff between what 5 would have been, and the new 5.
+    // seems wasteful to simulate frame 5 twice in this situation.
+    //
+    // instead, we're given the correction for the most recently simulated frame that got replaced,
+    // eg, frame 4.
     //
     // we already asserted that at tick 4 E1's health was 6, so we'd expect it to be 5 at tick 5.
     let twc = app.world.get::<TimewarpCorrection<Enemy>>(e1).unwrap();
     // component values before/after the rollback
-    assert_eq!(twc.before.health, 5);
-    assert_eq!(twc.after.health, 97);
-    assert_eq!(twc.frame, 5);
-
     warn!("{twc:?}");
+    assert_eq!(twc.before.health, 6);
+    assert_eq!(twc.after.health, 98);
+    assert_eq!(twc.frame, 4);
+
     // NB rendering is happening in PostUpdate, which runs after FixedUpdate
     //    * FixedUpdate @ 4 (normal frame)
     //    * PostUpdate render
@@ -155,9 +162,9 @@ fn error_correction() {
 
     // correction values shouldn't have changed – there was no rollback that frame
     let twc = app.world.get::<TimewarpCorrection<Enemy>>(e1).unwrap();
-    assert_eq!(twc.before.health, 5);
-    assert_eq!(twc.after.health, 97);
-    assert_eq!(twc.frame, 5);
+    assert_eq!(twc.before.health, 6);
+    assert_eq!(twc.after.health, 98);
+    assert_eq!(twc.frame, 4);
 
     tick(&mut app); // frame 7
     tick(&mut app); // frame 8
@@ -188,5 +195,5 @@ fn error_correction() {
     // no correction should be created since server confirmed predicted value,
     // thus the frame on the TimewarpCorrection should still be 5, from the earlier correction
     let twc = app.world.get::<TimewarpCorrection<Enemy>>(e1).unwrap();
-    assert_eq!(twc.frame, 5);
+    assert_eq!(twc.frame, 4);
 }

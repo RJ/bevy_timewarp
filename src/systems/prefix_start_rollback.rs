@@ -89,34 +89,46 @@ pub(crate) fn rollback_component<T: TimewarpComponent>(
             "game clock should already be set back by rollback_initiated"
         );
 
-        let opt_comp_at_frame = comp_hist.at_frame(rollback_frame);
-
-        let provenance = match (opt_comp_at_frame.is_some(), opt_comp.is_some()) {
+        let provenance = match (comp_hist.alive_at_frame(rollback_frame), opt_comp.is_some()) {
             (true, true) => Provenance::AliveThenAlive,
             (true, false) => Provenance::AliveThenDead,
             (false, true) => Provenance::DeadThenAlive,
             (false, false) => Provenance::DeadThenDead,
         };
 
-        info!(
-            "{game_clock:?} rollback component {} {provenance:?}",
-            comp_hist.type_name()
-        );
+        let comp_at_frame = comp_hist
+            .at_frame(rollback_frame)
+            .expect("Said it was alive");
 
         match provenance {
             Provenance::DeadThenDead => {
-                // noop
+                info!(
+                    "{game_clock:?} rollback component {entity:?} {} {provenance:?} - NOOP",
+                    comp_hist.type_name()
+                );
             }
             Provenance::DeadThenAlive => {
+                info!(
+                    "{game_clock:?} rollback component {entity:?} {} {provenance:?} - REMOVE<T>",
+                    comp_hist.type_name()
+                );
                 commands.entity(entity).remove::<T>();
             }
             Provenance::AliveThenAlive => {
-                *opt_comp.unwrap() = opt_comp_at_frame.unwrap().clone();
+                let comp_val = comp_at_frame.clone();
+                info!(
+                    "{game_clock:?} rollback component {entity:?} {} {provenance:?} - REPLACE WITH {comp_val:?}",
+                    comp_hist.type_name()
+                );
+                *opt_comp.unwrap() = comp_val;
             }
             Provenance::AliveThenDead => {
-                commands
-                    .entity(entity)
-                    .insert(opt_comp_at_frame.unwrap().clone());
+                let comp_val = comp_at_frame.clone();
+                info!(
+                    "{game_clock:?} rollback component {entity:?} {} {provenance:?} - INSERT {comp_val:?}",
+                    comp_hist.type_name()
+                );
+                commands.entity(entity).insert(comp_val);
             }
         }
     }

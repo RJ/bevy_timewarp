@@ -18,7 +18,6 @@ pub(crate) fn sanity_check(
     opt_rb: Option<Res<Rollback>>,
     mut prev_frame: Local<u32>,
 ) {
-    trace!("🐷 START OF ROLLBACK SETS {game_clock:?} rb:{opt_rb:?}");
     if **game_clock == 0 && opt_rb.is_some() {
         panic!(
             "⛔️ GameClock is on 0, but timewarp wants to rollback. {game_clock:?} rb:{:?}",

@@ -149,11 +149,7 @@ impl<T: TimewarpComponent> ComponentHistory<T> {
     }
     // adding entity just for debugging print outs.
     pub fn insert(&mut self, frame: FrameNumber, val: T, entity: &Entity) {
-        if self.correction_logging_enabled {
-            debug!("CH.Insert {entity:?} {frame} = {val:?}");
-        } else {
-            trace!("CH.Insert {entity:?} {frame} = {val:?}");
-        }
+        trace!("CH.Insert {entity:?} {frame} = {val:?}");
         self.values.insert(frame, val);
     }
 
@@ -177,10 +173,10 @@ impl<T: TimewarpComponent> ComponentHistory<T> {
         } else {
             trace!("component birth @ {frame} {:?}", std::any::type_name::<T>());
         }
-        assert!(
-            !self.alive_at_frame(frame),
-            "Can't report birth of component already alive"
-        );
+        if self.alive_at_frame(frame) {
+            warn!("Can't report birth of component already alive");
+            return;
+        }
         self.alive_ranges.push((frame, None));
     }
     pub fn report_death_at_frame(&mut self, frame: FrameNumber) {

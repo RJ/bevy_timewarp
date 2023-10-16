@@ -31,6 +31,7 @@ pub(crate) fn remove_descendents_from_despawning_entities(
     mut commands: Commands,
 ) {
     for entity in q.iter() {
+        info!("Despawn descendants of {entity:?} due to added despawn marker");
         commands.entity(entity).despawn_descendants();
     }
 }
@@ -111,14 +112,13 @@ pub(crate) fn add_timewarp_components<T: TimewarpComponent, const CORRECTION_LOG
         if CORRECTION_LOGGING {
             comp_history.enable_correction_logging();
         }
-        comp_history.insert(game_clock.frame(), comp.clone(), &e);
-
         debug!(
             "Adding ComponentHistory<> to {e:?} for {:?}\nInitial val @ {:?} = {:?}",
             std::any::type_name::<T>(),
             game_clock.frame(),
             comp.clone(),
         );
+        comp_history.insert(game_clock.frame(), comp.clone(), &e);
         commands.entity(e).insert((
             TimewarpStatus::new(0),
             comp_history,

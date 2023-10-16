@@ -75,7 +75,6 @@ impl TimewarpTraits for App {
             schedule.clone(),
             (
                 prefix_during_rollback::record_component_death::<T>,
-                prefix_during_rollback::rekill_components_during_rollback::<T>,
                 prefix_during_rollback::rebirth_components_during_rollback::<T>,
             )
                 .in_set(TimewarpPrefixSet::DuringRollback),
@@ -129,7 +128,10 @@ impl TimewarpTraits for App {
         );
         self.add_systems(
             schedule.clone(),
-            (postfix_during_rollback::clear_removed_components_queue::<T>,)
+            (
+                postfix_during_rollback::rekill_components_during_rollback::<T>,
+                postfix_during_rollback::clear_removed_components_queue::<T>,
+            )
                 .in_set(TimewarpPostfixSet::DuringRollback),
         )
     }

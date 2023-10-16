@@ -24,7 +24,7 @@ pub(crate) fn despawn_entities_with_elapsed_despawn_marker(
             == game_clock.frame()
         {
             debug!(
-                "Doing actual despawn of {entity:?} at frame {:?}",
+                "💀 Doing actual despawn of {entity:?} at frame {:?}",
                 game_clock.frame()
             );
             commands.entity(entity).despawn_recursive();

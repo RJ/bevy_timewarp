@@ -293,6 +293,7 @@ impl Plugin for TimewarpPlugin {
                         .run_if(not(resource_exists::<Rollback>())),
                     TimewarpPrefixSet::CheckIfRollbackNeeded
                         .run_if(not(resource_exists::<Rollback>())),
+                    // -- apply_deferred -- //
                     TimewarpPrefixSet::StartRollback.run_if(resource_added::<Rollback>()),
                     TimewarpPrefixSet::Last,
                 )
@@ -300,7 +301,45 @@ impl Plugin for TimewarpPlugin {
             )
             .add_systems(
                 self.config.schedule(),
+                apply_deferred
+                    .after(TimewarpPrefixSet::CheckIfRollbackComplete)
+                    .before(TimewarpPrefixSet::StartRollback),
+            )
+            .add_systems(
+                self.config.schedule(),
+                (|game_clock: Res<GameClock>, rb: Option<Res<Rollback>>| {
+                    info!("Prefix::First for {} {rb:?}", **game_clock + 1)
+                })
+                .in_set(TimewarpPrefixSet::First),
+            )
+            .add_systems(
+                self.config.schedule(),
+                (|game_clock: Res<GameClock>, rb: Option<Res<Rollback>>| {
+                    info!("Prefix::Last for {} {rb:?}", **game_clock + 1)
+                })
+                .in_set(TimewarpPrefixSet::Last),
+            )
+            .add_systems(
+                self.config.schedule(),
+                (|game_clock: Res<GameClock>, rb: Option<Res<Rollback>>| {
+                    info!("Postfix::First {game_clock:?} {rb:?}");
+                })
+                .in_set(TimewarpPostfixSet::First),
+            )
+            .add_systems(
+                self.config.schedule(),
+                (|game_clock: Res<GameClock>, rb: Option<Res<Rollback>>| {
+                    info!("Postfix::Last {game_clock:?} {rb:?}");
+                })
+                .in_set(TimewarpPostfixSet::Last),
+            )
+            .add_systems(
+                self.config.schedule(),
                 systems::sanity_check.in_set(TimewarpPrefixSet::First),
+            )
+            .add_systems(
+                self.config.schedule(),
+                apply_deferred.in_set(TimewarpPrefixSet::DuringRollback),
             )
             .add_systems(
                 self.config.schedule(),
@@ -322,12 +361,12 @@ impl Plugin for TimewarpPlugin {
             )
             .add_systems(
                 self.config.schedule(),
-                (
-                    systems::prefix_start_rollback::rollback_initiated,
-                    apply_deferred,
-                )
-                    .chain()
+                systems::prefix_start_rollback::rollback_initiated
                     .in_set(TimewarpPrefixSet::StartRollback),
+            )
+            .add_systems(
+                self.config.schedule(),
+                apply_deferred.in_set(TimewarpPrefixSet::Last),
             )
             //
             // POSTFIX
@@ -359,12 +398,12 @@ impl Plugin for TimewarpPlugin {
             // the specified first set must be after our TW prefix runs
             .configure_set(
                 self.config.schedule(),
-                self.config.first_set().after(TimewarpPrefixSet::First),
+                self.config.first_set().after(TimewarpPrefixSet::Last),
             )
             // the specified last set must be before the TW postfix runs.
             .configure_set(
                 self.config.schedule(),
-                self.config.last_set().before(TimewarpPrefixSet::First),
+                self.config.last_set().before(TimewarpPostfixSet::First),
             )
             //
             .insert_resource(FixedTime::new_from_secs(1.0 / 60.0))

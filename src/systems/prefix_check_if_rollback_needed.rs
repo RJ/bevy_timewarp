@@ -24,7 +24,7 @@ pub(crate) fn trigger_rollback_when_snapshot_added<T: TimewarpComponent>(
         (
             Entity,
             &ServerSnapshot<T>,
-            &ComponentHistory<T>,
+            &mut ComponentHistory<T>,
             &mut TimewarpStatus,
         ),
         Changed<ServerSnapshot<T>>, // this includes Added<>
@@ -33,7 +33,7 @@ pub(crate) fn trigger_rollback_when_snapshot_added<T: TimewarpComponent>(
     mut rb_ev: ResMut<Events<RollbackRequest>>,
     config: Res<TimewarpConfig>,
 ) {
-    for (entity, server_snapshot, comp_hist, mut tw_status) in q.iter_mut() {
+    for (entity, server_snapshot, mut comp_hist, mut tw_status) in q.iter_mut() {
         let snap_frame = server_snapshot.values.newest_frame();
 
         if snap_frame == 0 {
@@ -62,6 +62,9 @@ pub(crate) fn trigger_rollback_when_snapshot_added<T: TimewarpComponent>(
                 continue;
             }
         }
+
+        // new:
+        comp_hist.insert(snap_frame, comp_from_snapshot.clone(), &entity);
 
         debug!(
             "Triggering rollback due to snapshot. {entity:?} snap_frame: {snap_frame} {}",

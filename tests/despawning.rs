@@ -146,6 +146,10 @@ fn despawn_revival_during_rollback() {
     // timewarp systems run after game logic, and remove components, which will be done by f5.
     // TODO perhaps we want to move the despawn systems to a timewarp header set before game logic?
     //      this would make the behaviour seem more sane? hmm.
+
+    // when we get a "despawn @ 4" from the server, it means: it existed and was removed during 4
+    // make sure it's gone by 5?
+
     let despawn_frame = 4;
     app.world
         .entity_mut(e1)
