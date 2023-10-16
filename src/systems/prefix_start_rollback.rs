@@ -82,23 +82,36 @@ pub(crate) fn rollback_component<T: TimewarpComponent>(
     }
     let rollback_frame = rb.range.start;
 
-    for (entity, opt_comp, comp_hist) in q.iter_mut() {
-        assert_eq!(
-            game_clock.frame(),
-            rollback_frame,
-            "game clock should already be set back by rollback_initiated"
-        );
+    assert_eq!(
+        game_clock.frame(),
+        rollback_frame,
+        "game clock should already be set back by rollback_initiated"
+    );
 
-        let provenance = match (comp_hist.alive_at_frame(rollback_frame), opt_comp.is_some()) {
+    for (entity, opt_comp, comp_hist) in q.iter_mut() {
+        let provenance = match (
+            comp_hist.alive_at_frame(rollback_frame),
+            comp_hist.alive_at_frame(**game_clock),
+        ) {
             (true, true) => Provenance::AliveThenAlive,
             (true, false) => Provenance::AliveThenDead,
             (false, true) => Provenance::DeadThenAlive,
             (false, false) => Provenance::DeadThenDead,
         };
 
-        let comp_at_frame = comp_hist
-            .at_frame(rollback_frame)
-            .expect("Said it was alive");
+        let comp_at_frame = comp_hist.at_frame(rollback_frame);
+
+        if comp_at_frame.is_none() {
+            panic!(
+                "said it was alive.. {entity:?} {rollback_frame} {} {:?} {provenance:?}\n",
+                comp_hist.type_name(),
+                comp_hist.alive_ranges
+            );
+        }
+
+        let comp_at_frame = comp_at_frame.unwrap();
+
+        // .expect("Said it was alive");
 
         match provenance {
             Provenance::DeadThenDead => {
@@ -120,7 +133,14 @@ pub(crate) fn rollback_component<T: TimewarpComponent>(
                     "{game_clock:?} rollback component {entity:?} {} {provenance:?} - REPLACE WITH {comp_val:?}",
                     comp_hist.type_name()
                 );
-                *opt_comp.unwrap() = comp_val;
+                if let Some(mut opt_comp) = opt_comp {
+                    *opt_comp = comp_val;
+                } else {
+                    warn!(
+                        "{entity:?} Actually having to insert for {comp_val:?} doesn't exist yet"
+                    );
+                    commands.entity(entity).insert(comp_val);
+                }
             }
             Provenance::AliveThenDead => {
                 let comp_val = comp_at_frame.clone();

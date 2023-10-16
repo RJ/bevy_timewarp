@@ -58,7 +58,7 @@ pub(crate) fn trigger_rollback_when_snapshot_added<T: TimewarpComponent>(
         if let Some(stored_comp_val) = comp_hist.at_frame(snap_frame) {
             if !config.forced_rollback() && *stored_comp_val == *comp_from_snapshot {
                 // a correct prediction, no need to rollback. hooray!
-                info!("skipping rollback 🎖️ {stored_comp_val:?}");
+                info!("skipping rollback 🎖️ {entity:?} {stored_comp_val:?}");
                 continue;
             }
         }
@@ -107,7 +107,10 @@ pub(crate) fn trigger_rollback_when_icaf_added<
         ss.insert(icaf.frame, icaf.component.clone());
         // (this will be applied in the ApplyComponents set next)
         commands.entity(e).insert((tw_status, ch, ss));
-
+        info!(
+            "{e:?} trigger_rollback_when_icaf_added {icaf:?} requesting rb to {}",
+            icaf.frame
+        );
         // trigger a rollback using the frame we just added authoritative values for
         rb_ev.send(RollbackRequest(icaf.frame));
     }
@@ -119,7 +122,9 @@ pub(crate) fn trigger_rollback_when_blueprint_added<T: TimewarpComponent>(
     mut rb_ev: ResMut<Events<RollbackRequest>>,
 ) {
     for abaf in q.iter() {
-        let snap_frame = abaf.frame;
+        // this system runs in preup, and the clock is about to increment.
+        // so we need to be abaf.frame-1 in preup for it to be unwrapped
+        let snap_frame = abaf.frame; //.saturating_sub(1);
         if snap_frame < **game_clock {
             info!(
                 "{game_clock:?} TRIGGERING ROLLBACK to {snap_frame} due to added blueprint: {abaf:?}"

@@ -147,7 +147,7 @@ pub(crate) fn record_component_birth<T: TimewarpComponent>(
         return;
     }
 
-    for (entity, mut ct) in q.iter_mut() {
+    for (entity, mut ch) in q.iter_mut() {
         debug!(
             "{entity:?} Component birth @ {:?} {:?}",
             game_clock.frame(),
@@ -157,10 +157,11 @@ pub(crate) fn record_component_birth<T: TimewarpComponent>(
         // but this system won't catch it via Added<> until the next frame, which we need to supress.
         // an alternative solution is to force insert_components_at_prior_frames to run before this,
         // with an apply_deferred, but that seemed worse. systems run in parallel at the mo.
-        if ct.alive_ranges.first() == Some(&(game_clock.frame() - 1, None)) {
+        if ch.alive_ranges.first() == Some(&(game_clock.frame() - 1, None)) {
             // this comp is alive and born last frame: skip registering the birth.
+            warn!("Skipping birth reporting due to -1 frame.. {game_clock:?}");
             return;
         }
-        ct.report_birth_at_frame(game_clock.frame());
+        ch.report_birth_at_frame(game_clock.frame());
     }
 }

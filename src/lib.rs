@@ -243,6 +243,10 @@ pub enum TimewarpPrefixSet {
     /// ...
     StartRollback,
 
+    /// Runs always, unpacks non-timewarp components at this frame.
+    /// Current used for blueprints.
+    UnwrapBlueprints,
+
     Last,
 }
 
@@ -295,6 +299,7 @@ impl Plugin for TimewarpPlugin {
                         .run_if(not(resource_exists::<Rollback>())),
                     // -- apply_deferred -- //
                     TimewarpPrefixSet::StartRollback.run_if(resource_added::<Rollback>()),
+                    TimewarpPrefixSet::UnwrapBlueprints,
                     TimewarpPrefixSet::Last,
                 )
                     .chain(),

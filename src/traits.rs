@@ -49,8 +49,8 @@ impl TimewarpTraits for App {
         // we hit the exact frame to unwrap it like this:
         self.add_systems(
             schedule.clone(),
-            prefix_jit::unwrap_blueprints_at_target_frame::<T>
-                .in_set(TimewarpPrefixSet::ApplyJustInTimeComponents),
+            prefix_blueprints::unwrap_blueprints_at_target_frame::<T>
+                .in_set(TimewarpPrefixSet::UnwrapBlueprints),
         );
         self.add_systems(
             schedule.clone(),

@@ -5,6 +5,7 @@ pub(crate) mod postfix_components;
 pub(crate) mod postfix_during_rollback;
 pub(crate) mod postfix_last;
 
+pub(crate) mod prefix_blueprints;
 pub(crate) mod prefix_check_for_rollback_completion;
 pub(crate) mod prefix_check_if_rollback_needed;
 pub(crate) mod prefix_during_rollback;

@@ -55,7 +55,7 @@ pub(crate) fn apply_jit_icafs<T: TimewarpComponent, const CORRECTION_LOGGING: bo
         } else {
             ent_cmd.insert(TimewarpStatus::new(icaf.frame));
         }
-
+        info!("apply_jit_icafs {entity:?} {icaf:?} unwrapping without rb request");
         if let Some(mut ss) = opt_ss {
             ent_cmd.remove::<InsertComponentAtFrame<T>>();
             ss.insert(icaf.frame, icaf.component.clone());
@@ -78,28 +78,5 @@ pub(crate) fn apply_jit_icafs<T: TimewarpComponent, const CORRECTION_LOGGING: bo
                 .remove::<InsertComponentAtFrame<T>>()
                 .insert((ch, ss, tw_status));
         }
-    }
-}
-
-/// Blueprint components stay wrapped up until their target frame, then we unwrap them
-/// so the assembly systems can decorate them with various other components at that frame.
-pub(crate) fn unwrap_blueprints_at_target_frame<T: TimewarpComponent>(
-    q: Query<(Entity, &AssembleBlueprintAtFrame<T>)>,
-    mut commands: Commands,
-    game_clock: Res<GameClock>,
-    rb: Res<Rollback>,
-) {
-    for (e, abaf) in q.iter() {
-        if abaf.frame != **game_clock {
-            continue;
-        }
-        info!(
-            "🎁 Unwrapping {abaf:?} @ {game_clock:?} {rb:?} {}",
-            std::any::type_name::<T>()
-        );
-        commands
-            .entity(e)
-            .insert(abaf.component.clone())
-            .remove::<AssembleBlueprintAtFrame<T>>();
     }
 }
