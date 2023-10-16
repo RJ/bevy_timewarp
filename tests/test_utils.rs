@@ -22,7 +22,7 @@ pub struct EntName {
 }
 
 pub fn setup_test_app() -> App {
-    let tw_config = TimewarpConfig::new(TimewarpTestSets::GameLogic)
+    let tw_config = TimewarpConfig::new(TimewarpTestSets::GameLogic, TimewarpTestSets::GameLogic)
         .set_rollback_window(TEST_ROLLBACK_WINDOW)
         .set_schedule(FixedUpdate);
     let mut app = App::new();

@@ -16,8 +16,10 @@ pub struct TimewarpConfig {
     pub force_rollback_always: bool,
     /// schedule in which our `after_set` and rollback systems run, defaults to FixedUpdate
     pub schedule: Box<dyn ScheduleLabel>,
-    /// set containing game logic, after which the rollback systems will run
-    pub after_set: BoxedSystemSet,
+    /// first set containing game logic
+    pub first_set: BoxedSystemSet,
+    /// last set containing game logic
+    pub last_set: BoxedSystemSet,
 }
 
 impl TimewarpConfig {
@@ -25,9 +27,10 @@ impl TimewarpConfig {
     /// rollback_window: 30
     /// forced_rollback: false
     /// schedule: FixedUpdate
-    pub fn new(after_set: impl SystemSet) -> Self {
+    pub fn new(first_set: impl SystemSet, last_set: impl SystemSet) -> Self {
         Self {
-            after_set: Box::new(after_set),
+            first_set: Box::new(first_set),
+            last_set: Box::new(last_set),
             // and defaults, override with builder fns:
             rollback_window: 30,
             force_rollback_always: false,
@@ -46,8 +49,11 @@ impl TimewarpConfig {
         self.rollback_window = num_frames;
         self
     }
-    pub fn after_set(&self) -> BoxedSystemSet {
-        self.after_set.as_ref().dyn_clone()
+    pub fn first_set(&self) -> BoxedSystemSet {
+        self.first_set.as_ref().dyn_clone()
+    }
+    pub fn last_set(&self) -> BoxedSystemSet {
+        self.last_set.as_ref().dyn_clone()
     }
     pub fn forced_rollback(&self) -> bool {
         self.force_rollback_always
@@ -80,6 +86,7 @@ pub struct Rollback {
     /// we preserve the original FixedUpdate period here and restore after rollback completes.
     /// (during rollback, we set the FixedUpdate period to 0.0, to effect fast-forward resimulation)
     pub original_period: Option<Duration>,
+    aborted: bool,
 }
 impl Rollback {
     /// The range start..end contains all values with start <= x < end. It is empty if start >= end.
@@ -87,7 +94,14 @@ impl Rollback {
         Self {
             range: Range { start, end },
             original_period: None,
+            aborted: false,
         }
+    }
+    pub fn abort(&mut self) {
+        self.aborted = true;
+    }
+    pub fn aborted(&self) -> bool {
+        self.aborted
     }
 }
 

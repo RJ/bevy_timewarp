@@ -12,7 +12,7 @@ use std::{collections::VecDeque, ops::Range};
 #[derive(Debug, Resource, Clone)]
 pub struct FrameBuffer<T>
 where
-    T: Clone + Send + Sync + std::fmt::Debug,
+    T: Clone + Send + Sync + PartialEq + std::fmt::Debug,
 {
     /// Contains Option<T> because there can be gaps
     /// and we want to be able to store 'None' as a normal value in here.
@@ -39,7 +39,7 @@ where
 
 impl<T> FrameBuffer<T>
 where
-    T: Clone + Send + Sync + std::fmt::Debug,
+    T: Clone + Send + Sync + PartialEq + std::fmt::Debug,
 {
     pub fn with_capacity(len: usize) -> Self {
         Self {
@@ -116,6 +116,12 @@ where
         }
     }
 
+    pub fn insert_blanks(&mut self, num_blanks: usize) {
+        for _ in 0..num_blanks {
+            self.entries.push_front(None);
+        }
+    }
+
     /// insert value at given frame.
     /// It is permitted to insert at old frames that are still in the range, but
     /// not allowed to insert at a frame older than the oldest existing frame.
@@ -140,6 +146,8 @@ where
         // are we replacing a potential existing value, ie no change in buffer range
         if let Some(index) = self.index(frame) {
             if let Some(val) = self.entries.get_mut(index) {
+                // TODO should we test if we are we replacing with same-val that already exists,
+                // and bail out here? would still need to avoid mutably derefing the SS somehow.
                 *val = Some(value);
             }
             return;

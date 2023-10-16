@@ -57,6 +57,26 @@ impl<T: TimewarpComponent> AssembleBlueprintAtFrame<T> {
     pub fn new(frame: FrameNumber, component: T) -> Self {
         Self { component, frame }
     }
+    pub fn type_name(&self) -> &str {
+        std::any::type_name::<T>()
+    }
+}
+
+/// Components that should be inserted at specific frames get wrapped up in in one of these
+/// then unwrapped (ie, inserted into the entity) at the specified `frame`, and the
+/// `UnwrapAtFrame<T>` is removed.
+#[derive(Component, Debug)]
+pub struct UnwrapAtFrame<T: Component + Clone + std::fmt::Debug> {
+    pub component: T,
+    pub frame: FrameNumber,
+}
+impl<T: Component + Clone + std::fmt::Debug> UnwrapAtFrame<T> {
+    pub fn new(frame: FrameNumber, component: T) -> Self {
+        Self { component, frame }
+    }
+    pub fn type_name(&self) -> &str {
+        std::any::type_name::<T>()
+    }
 }
 
 /// entities with components that were registered with error correction logging will receive
@@ -88,6 +108,9 @@ impl<T: TimewarpComponent> ServerSnapshot<T> {
     pub fn insert(&mut self, frame: FrameNumber, val: T) {
         self.values.insert(frame, val);
     }
+    pub fn type_name(&self) -> &str {
+        std::any::type_name::<T>()
+    }
 }
 
 /// used to record component birth/death ranges in ComponentHistory.
@@ -114,6 +137,9 @@ impl<T: TimewarpComponent> ComponentHistory<T> {
         this.report_birth_at_frame(birth_frame);
         this
     }
+    pub fn type_name(&self) -> &str {
+        std::any::type_name::<T>()
+    }
     /// will compute and insert `TimewarpCorrection`s when snapping
     pub fn enable_correction_logging(&mut self) {
         self.correction_logging_enabled = true;
@@ -123,15 +149,21 @@ impl<T: TimewarpComponent> ComponentHistory<T> {
     }
     // adding entity just for debugging print outs.
     pub fn insert(&mut self, frame: FrameNumber, val: T, entity: &Entity) {
-        trace!("CH.Insert {entity:?} {frame} = {val:?}");
+        if self.correction_logging_enabled {
+            debug!("CH.Insert {entity:?} {frame} = {val:?}");
+        } else {
+            trace!("CH.Insert {entity:?} {frame} = {val:?}");
+        }
         self.values.insert(frame, val);
     }
+
     /// removes values buffered for this frame, and greater frames.
     pub fn remove_frame_and_beyond(&mut self, frame: FrameNumber) {
         self.values
             .remove_entries_newer_than(frame.saturating_sub(1));
     }
     pub fn alive_at_frame(&self, frame: FrameNumber) -> bool {
+        // self.values.get(frame).is_some()
         for (start, maybe_end) in &self.alive_ranges {
             if *start <= frame && (maybe_end.is_none() || maybe_end.unwrap() > frame) {
                 return true;
@@ -140,7 +172,11 @@ impl<T: TimewarpComponent> ComponentHistory<T> {
         false
     }
     pub fn report_birth_at_frame(&mut self, frame: FrameNumber) {
-        debug!("component birth @ {frame} {:?}", std::any::type_name::<T>());
+        if self.correction_logging_enabled {
+            debug!("component birth @ {frame} {:?}", std::any::type_name::<T>());
+        } else {
+            trace!("component birth @ {frame} {:?}", std::any::type_name::<T>());
+        }
         assert!(
             !self.alive_at_frame(frame),
             "Can't report birth of component already alive"
@@ -156,11 +192,19 @@ impl<T: TimewarpComponent> ComponentHistory<T> {
         if !self.alive_at_frame(frame) {
             return;
         }
-        debug!(
-            "component death @ {frame} {:?} {:?}",
-            std::any::type_name::<T>(),
-            self.alive_ranges
-        );
+        if self.correction_logging_enabled {
+            debug!(
+                "component death @ {frame} {:?} {:?}",
+                std::any::type_name::<T>(),
+                self.alive_ranges
+            );
+        } else {
+            trace!(
+                "component death @ {frame} {:?} {:?}",
+                std::any::type_name::<T>(),
+                self.alive_ranges
+            );
+        }
         assert!(
             self.alive_at_frame(frame),
             "Can't report death of component not alive"
