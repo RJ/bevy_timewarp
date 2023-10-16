@@ -61,7 +61,7 @@ This means inputs from the server arriving at the client are, from the client's 
 | Set                   | Action                                                                                                                                                                 |
 | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | CheckIfRollbackNeeded | Was a SS updated, or icaf added, with a new value for `ss.frame < gc.frame`? if so, trigger rollback                                                                   |
-| UnpackComponents      | Unpack anything for frame `gc.frame` - we're about to increment, and then need last frame's values to exist. This could be values in SS, or ICAF components to unwrap. |
+| ApplyComponents      | Apply anything for frame `gc.frame` - we're about to increment, and then need last frame's values to exist. This could be values in SS, or ICAF components to unwrap. |
 
 </td>
 </tr>

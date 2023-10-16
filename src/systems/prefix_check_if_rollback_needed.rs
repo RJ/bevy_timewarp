@@ -24,7 +24,7 @@ pub(crate) fn trigger_rollback_when_snapshot_added<T: TimewarpComponent>(
         (
             Entity,
             &ServerSnapshot<T>,
-            &mut ComponentHistory<T>,
+            &ComponentHistory<T>,
             &mut TimewarpStatus,
         ),
         Changed<ServerSnapshot<T>>, // this includes Added<>
@@ -32,9 +32,8 @@ pub(crate) fn trigger_rollback_when_snapshot_added<T: TimewarpComponent>(
     game_clock: Res<GameClock>,
     mut rb_ev: ResMut<Events<RollbackRequest>>,
     config: Res<TimewarpConfig>,
-    mut commands: Commands,
 ) {
-    for (entity, server_snapshot, mut comp_hist, mut tw_status) in q.iter_mut() {
+    for (entity, server_snapshot, comp_hist, mut tw_status) in q.iter_mut() {
         let snap_frame = server_snapshot.values.newest_frame();
 
         if snap_frame == 0 {
@@ -46,6 +45,8 @@ pub(crate) fn trigger_rollback_when_snapshot_added<T: TimewarpComponent>(
         if snap_frame >= **game_clock {
             continue;
         }
+
+        tw_status.set_snapped_at(snap_frame);
 
         // the value in the SS that we are concerned with, which may possibly trigger a rollback:
         let comp_from_snapshot = server_snapshot

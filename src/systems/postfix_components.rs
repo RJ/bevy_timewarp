@@ -9,10 +9,10 @@ use bevy::prelude::*;
 /// despawn marker means remove all useful components, pending actual despawn after
 /// ROLLBACK_WINDOW frames have elapsed.
 pub(crate) fn remove_components_from_despawning_entities<T: TimewarpComponent>(
-    mut q: Query<(Entity, &mut ComponentHistory<T>), (Added<DespawnMarker>, With<T>)>,
+    q: Query<(Entity, &ComponentHistory<T>), (Added<DespawnMarker>, With<T>)>,
     mut commands: Commands,
 ) {
-    for (entity, mut ch) in q.iter_mut() {
+    for (entity, _ch) in q.iter() {
         debug!(
             "doing despawn marker component removal for {entity:?} / {:?}",
             std::any::type_name::<T>()

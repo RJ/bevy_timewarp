@@ -57,11 +57,12 @@ pub(crate) fn rollback_initiated(
 }
 
 // for clarity when rolling back components
+#[derive(Debug)]
 enum Provenance {
-    AliveThenAliveNow,
-    AliveThenDeadNow,
-    DeadThenAliveNow,
-    DeadThenDeadNow,
+    AliveThenAlive,
+    AliveThenDead,
+    DeadThenAlive,
+    DeadThenDead,
 }
 
 /// Runs if Rollback was only just Added.
@@ -91,23 +92,28 @@ pub(crate) fn rollback_component<T: TimewarpComponent>(
         let opt_comp_at_frame = comp_hist.at_frame(rollback_frame);
 
         let provenance = match (opt_comp_at_frame.is_some(), opt_comp.is_some()) {
-            (true, true) => Provenance::AliveThenAliveNow,
-            (true, false) => Provenance::AliveThenDeadNow,
-            (false, true) => Provenance::DeadThenAliveNow,
-            (false, false) => Provenance::DeadThenDeadNow,
+            (true, true) => Provenance::AliveThenAlive,
+            (true, false) => Provenance::AliveThenDead,
+            (false, true) => Provenance::DeadThenAlive,
+            (false, false) => Provenance::DeadThenDead,
         };
 
+        info!(
+            "{game_clock:?} rollback component {} {provenance:?}",
+            comp_hist.type_name()
+        );
+
         match provenance {
-            Provenance::DeadThenDeadNow => {
+            Provenance::DeadThenDead => {
                 // noop
             }
-            Provenance::DeadThenAliveNow => {
+            Provenance::DeadThenAlive => {
                 commands.entity(entity).remove::<T>();
             }
-            Provenance::AliveThenAliveNow => {
+            Provenance::AliveThenAlive => {
                 *opt_comp.unwrap() = opt_comp_at_frame.unwrap().clone();
             }
-            Provenance::AliveThenDeadNow => {
+            Provenance::AliveThenDead => {
                 commands
                     .entity(entity)
                     .insert(opt_comp_at_frame.unwrap().clone());

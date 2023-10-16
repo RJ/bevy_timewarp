@@ -15,8 +15,6 @@ pub(crate) fn apply_jit_ss<T: TimewarpComponent>(
         Changed<ServerSnapshot<T>>, // this includes Added<>
     >,
     game_clock: Res<GameClock>,
-    mut rb_ev: ResMut<Events<RollbackRequest>>,
-    config: Res<TimewarpConfig>,
     mut commands: Commands,
 ) {
     for (entity, server_snapshot) in q.iter() {
@@ -47,7 +45,6 @@ pub(crate) fn apply_jit_icafs<T: TimewarpComponent, const CORRECTION_LOGGING: bo
     )>,
     mut commands: Commands,
     timewarp_config: Res<TimewarpConfig>,
-    game_clock: Res<GameClock>,
 ) {
     for (entity, icaf, opt_ch, opt_ss, opt_tw_status) in q.iter_mut() {
         assert!(
