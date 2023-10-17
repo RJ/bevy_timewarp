@@ -1,4 +1,4 @@
-use crate::prelude::*;
+use crate::{game_clock, prelude::*};
 use bevy::prelude::*;
 /*
     NOTE: Timewarp Prefix Systems run at the top of FixedUpdate:
@@ -31,16 +31,18 @@ pub(crate) fn rebirth_components_during_rollback<T: TimewarpComponent>(
     q: Query<(Entity, &ComponentHistory<T>), Without<T>>,
     game_clock: Res<GameClock>,
     mut commands: Commands,
+    rb: Res<Rollback>,
 ) {
     let target_frame = game_clock.frame() + 1;
     for (entity, comp_history) in q.iter() {
         if comp_history.alive_at_frame(target_frame) {
             let comp_val = comp_history.at_frame(target_frame).unwrap_or_else(|| {
                 error!(
-                    // hitting this, spamming bullets
-                    "{entity:?} no comp history for {:?} for {:?}",
+                    // hitting this, spamming bullets.. gaps in CH values, can't rb to a gap?
+                    "{entity:?} no comp history for {:?} for {:?} focc:{:?} {game_clock:?} {rb:?}",
                     target_frame,
-                    std::any::type_name::<T>()
+                    std::any::type_name::<T>(),
+                    comp_history.values.frame_occupancy(),
                 );
                 error!("alive_ranges: {:?}", comp_history.alive_ranges);
                 panic!("death");

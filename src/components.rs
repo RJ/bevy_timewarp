@@ -1,4 +1,4 @@
-use crate::{FrameBuffer, FrameNumber, TimewarpComponent};
+use crate::{prelude::TimewarpError, FrameBuffer, FrameNumber, TimewarpComponent};
 use bevy::prelude::*;
 
 /// entities with NotRollbackable are ignored, even if they have components which
@@ -99,14 +99,14 @@ pub struct ServerSnapshot<T: TimewarpComponent> {
 impl<T: TimewarpComponent> ServerSnapshot<T> {
     pub fn with_capacity(len: usize) -> Self {
         Self {
-            values: FrameBuffer::with_capacity(len),
+            values: FrameBuffer::with_capacity(len, "SS"),
         }
     }
     pub fn at_frame(&self, frame: FrameNumber) -> Option<&T> {
         self.values.get(frame)
     }
-    pub fn insert(&mut self, frame: FrameNumber, val: T) {
-        self.values.insert(frame, val);
+    pub fn insert(&mut self, frame: FrameNumber, val: T) -> Result<(), TimewarpError> {
+        self.values.insert(frame, val)
     }
     pub fn type_name(&self) -> &str {
         std::any::type_name::<T>()
@@ -128,13 +128,21 @@ pub struct ComponentHistory<T: TimewarpComponent> {
 // lazy first version - don't need a clone each frame if value hasn't changed!
 // just store once and reference from each unchanged frame number.
 impl<T: TimewarpComponent> ComponentHistory<T> {
-    pub fn with_capacity(len: usize, birth_frame: FrameNumber) -> Self {
+    /// The entity param is just for logging.
+    pub fn with_capacity(
+        len: usize,
+        birth_frame: FrameNumber,
+        component: T,
+        entity: &Entity,
+    ) -> Self {
         let mut this = Self {
-            values: FrameBuffer::with_capacity(len),
-            alive_ranges: Vec::new(),
+            values: FrameBuffer::with_capacity(len, "CH"),
+            alive_ranges: vec![(birth_frame, None)],
             correction_logging_enabled: false,
         };
-        this.report_birth_at_frame(birth_frame);
+        trace!("CH.new {entity:?} {birth_frame} = {component:?}");
+        // can't error on a brand new buffer:
+        _ = this.values.insert(birth_frame, component);
         this
     }
     pub fn type_name(&self) -> &str {
@@ -148,9 +156,14 @@ impl<T: TimewarpComponent> ComponentHistory<T> {
         self.values.get(frame)
     }
     // adding entity just for debugging print outs.
-    pub fn insert(&mut self, frame: FrameNumber, val: T, entity: &Entity) {
+    pub fn insert(
+        &mut self,
+        frame: FrameNumber,
+        val: T,
+        entity: &Entity,
+    ) -> Result<(), TimewarpError> {
         trace!("CH.Insert {entity:?} {frame} = {val:?}");
-        self.values.insert(frame, val);
+        self.values.insert(frame, val)
     }
 
     /// removes values buffered for this frame, and greater frames.
@@ -173,6 +186,10 @@ impl<T: TimewarpComponent> ComponentHistory<T> {
             warn!("Can't report birth of component already alive");
             return;
         }
+        assert!(
+            self.values.get(frame).is_some(),
+            "No stored component value when reporting birth @ {frame}"
+        );
         self.alive_ranges.push((frame, None));
     }
     pub fn report_death_at_frame(&mut self, frame: FrameNumber) {

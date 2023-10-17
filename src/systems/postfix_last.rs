@@ -23,7 +23,7 @@ pub(crate) fn despawn_entities_with_elapsed_despawn_marker(
             + timewarp_config.rollback_window)
             == game_clock.frame()
         {
-            debug!(
+            trace!(
                 "💀 Doing actual despawn of {entity:?} at frame {:?}",
                 game_clock.frame()
             );

@@ -9,20 +9,23 @@ use bevy::prelude::*;
 /// despawn marker means remove all useful components, pending actual despawn after
 /// ROLLBACK_WINDOW frames have elapsed.
 pub(crate) fn remove_components_from_despawning_entities<T: TimewarpComponent>(
-    q: Query<(Entity, &ComponentHistory<T>), (Added<DespawnMarker>, With<T>)>,
+    mut q: Query<
+        (Entity, &mut ComponentHistory<T>, &DespawnMarker),
+        (Added<DespawnMarker>, With<T>),
+    >,
     mut commands: Commands,
+    game_clock: Res<GameClock>,
 ) {
-    for (entity, _ch) in q.iter() {
-        debug!(
-            "doing despawn marker component removal for {entity:?} / {:?}",
+    for (entity, mut ch, dsm) in q.iter_mut() {
+        trace!(
+            "doing despawn marker {dsm:?} component removal for {entity:?} / {:?}",
             std::any::type_name::<T>()
         );
         // record_component_death looks at RemovedComponents and will catch this, and
         // register the death (ie, comphist.report_death_at_frame)
-        //
-        // actually with no recorded history at a frame, that just implies death right?
-        // so why do we care about recording death..
         commands.entity(entity).remove::<T>();
+
+        ch.report_death_at_frame(game_clock.frame()); ///// RJRJRJ was in place for smooth game. investigate.
     }
 }
 
@@ -31,8 +34,8 @@ pub(crate) fn remove_descendents_from_despawning_entities(
     mut commands: Commands,
 ) {
     for entity in q.iter() {
-        info!("Despawn descendants of {entity:?} due to added despawn marker");
-        commands.entity(entity).despawn_descendants();
+        trace!("NOT REALLY Despawn descendants of {entity:?} due to added despawn marker");
+        // commands.entity(entity).despawn_descendants();
     }
 }
 
@@ -83,7 +86,12 @@ pub(crate) fn record_component_history<T: TimewarpComponent>(
         }
         // the main point of this system is just to save the component value to the buffer:
         // insert() does some logging
-        comp_hist.insert(game_clock.frame(), comp.clone(), &entity);
+        match comp_hist.insert(game_clock.frame(), comp.clone(), &entity) {
+            Ok(()) => (),
+            Err(err) => {
+                warn!("{err:?} Inserted a too-old frame value in record_component_history @ {game_clock:?} {}", comp_hist.type_name());
+            }
+        }
     }
 }
 
@@ -108,6 +116,8 @@ pub(crate) fn add_timewarp_components<T: TimewarpComponent, const CORRECTION_LOG
         let mut comp_history = ComponentHistory::<T>::with_capacity(
             timewarp_config.rollback_window as usize,
             game_clock.frame(),
+            comp.clone(),
+            &e,
         );
         if CORRECTION_LOGGING {
             comp_history.enable_correction_logging();
@@ -118,7 +128,6 @@ pub(crate) fn add_timewarp_components<T: TimewarpComponent, const CORRECTION_LOG
             game_clock.frame(),
             comp.clone(),
         );
-        comp_history.insert(game_clock.frame(), comp.clone(), &e);
         commands.entity(e).insert((
             TimewarpStatus::new(0),
             comp_history,
@@ -153,15 +162,10 @@ pub(crate) fn record_component_birth<T: TimewarpComponent>(
             game_clock.frame(),
             std::any::type_name::<T>()
         );
-        // if an entity was created with InsertComponentAtPastFrame it will have its birth frame recorded
-        // but this system won't catch it via Added<> until the next frame, which we need to supress.
-        // an alternative solution is to force insert_components_at_prior_frames to run before this,
-        // with an apply_deferred, but that seemed worse. systems run in parallel at the mo.
-        if ch.alive_ranges.first() == Some(&(game_clock.frame() - 1, None)) {
-            // this comp is alive and born last frame: skip registering the birth.
-            warn!("Skipping birth reporting due to -1 frame.. {game_clock:?}");
-            return;
-        }
-        ch.report_birth_at_frame(game_clock.frame());
+        ch.report_birth_at_frame(**game_clock);
+        assert!(
+            ch.at_frame(**game_clock).is_some(),
+            "Reported birth, but no CH value stored"
+        );
     }
 }

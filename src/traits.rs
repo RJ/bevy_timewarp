@@ -1,5 +1,5 @@
 use crate::systems::*;
-use bevy::prelude::*;
+use bevy::{ecs::world::EntityMut, prelude::*};
 
 use super::*;
 
@@ -49,7 +49,11 @@ impl TimewarpTraits for App {
         // we hit the exact frame to unwrap it like this:
         self.add_systems(
             schedule.clone(),
-            prefix_blueprints::unwrap_blueprints_at_target_frame::<T>
+            //  this apply_deferred is a hack so Res<Rollback> is visible for debugging in this systeem
+            (
+                apply_deferred,
+                prefix_blueprints::unwrap_blueprints_at_target_frame::<T>,
+            )
                 .in_set(TimewarpPrefixSet::UnwrapBlueprints),
         );
         self.add_systems(
@@ -71,36 +75,50 @@ impl TimewarpTraits for App {
         /*
                Prefix Systems
         */
+        if CORRECTION_LOGGING {
+            self.add_systems(
+                schedule.clone(),
+                prefix_first::enable_error_correction_for_new_component_histories::<T>
+                    .in_set(TimewarpPrefixSet::First),
+            );
+        }
+        self.add_systems(
+            schedule.clone(), // TODO RJRJR move to _first file?
+            prefix_check_if_rollback_needed::detect_misuse_of_icaf::<T>
+                .in_set(TimewarpPrefixSet::First),
+        );
+        self.add_systems(
+            schedule.clone(), // TODO RJRJ MOVE FILE
+            prefix_during_rollback::record_component_death::<T>
+                .run_if(not(resource_exists::<Rollback>()))
+                .in_set(TimewarpPrefixSet::First), // RJRJRJ X
+        );
         self.add_systems(
             schedule.clone(),
             (
-                prefix_during_rollback::record_component_death::<T>,
+                // prefix_during_rollback::record_component_death::<T>,
                 prefix_during_rollback::rebirth_components_during_rollback::<T>,
             )
                 .in_set(TimewarpPrefixSet::DuringRollback),
         );
         self.add_systems(
             schedule.clone(),
-            ((
-                (
-                    prefix_jit::apply_jit_icafs::<T, CORRECTION_LOGGING>,
-                    prefix_jit::apply_jit_ss::<T>,
-                ),
-                apply_deferred,
+            (
+                prefix_jit::apply_jit_icafs::<T, CORRECTION_LOGGING>,
+                prefix_jit::apply_jit_ss::<T>,
             )
-                .chain())
-            .in_set(TimewarpPrefixSet::ApplyJustInTimeComponents),
+                .in_set(TimewarpPrefixSet::ApplyJustInTimeComponents),
         );
         // this may result in a Rollback resource being inserted.
         self.add_systems(
             schedule.clone(),
             (
                 prefix_check_if_rollback_needed::detect_misuse_of_icaf::<T>,
-                prefix_check_if_rollback_needed::trigger_rollback_when_icaf_added::<
+                prefix_check_if_rollback_needed::unpack_icafs_and_maybe_rollback::<
                     T,
                     CORRECTION_LOGGING,
                 >,
-                prefix_check_if_rollback_needed::trigger_rollback_when_snapshot_added::<T>,
+                prefix_check_if_rollback_needed::apply_snapshots_and_maybe_rollback::<T>,
             )
                 .before(prefix_check_if_rollback_needed::consolidate_rollback_requests)
                 .in_set(TimewarpPrefixSet::CheckIfRollbackNeeded),
@@ -134,5 +152,65 @@ impl TimewarpTraits for App {
             )
                 .in_set(TimewarpPostfixSet::DuringRollback),
         )
+    }
+}
+
+pub enum InsertComponentResult {
+    /// means the SS already existed
+    IntoExistingSnapshot,
+    /// had to add the timewarp components. SS, CH.
+    ComponentsAdded,
+}
+
+pub trait EntityMutICAF {
+    /// For inserting a component into a specific frame.
+    /// Timewarp systems will insert into the entity at the correct point.
+    fn insert_component_at_frame<T: TimewarpComponent>(
+        &mut self,
+        frame: FrameNumber,
+        component: &T,
+    ) -> Result<InsertComponentResult, TimewarpError>;
+}
+
+impl EntityMutICAF for EntityMut<'_> {
+    fn insert_component_at_frame<T: TimewarpComponent>(
+        &mut self,
+        frame: FrameNumber,
+        component: &T,
+    ) -> Result<InsertComponentResult, TimewarpError> {
+        if let Some(mut ss) = self.get_mut::<ServerSnapshot<T>>() {
+            ss.insert(frame, component.clone())?;
+            Ok(InsertComponentResult::IntoExistingSnapshot)
+        } else {
+            let tw_config = self
+                .world()
+                .get_resource::<TimewarpConfig>()
+                .expect("TimewarpConfig resource missing");
+            let window_size = tw_config.rollback_window() as usize;
+            // insert component value at this frame, since the system that records it won't run
+            // if a rollback is happening this frame. and if it does it just overwrites
+            let comp_history = ComponentHistory::<T>::with_capacity(
+                // timewarp_config.rollback_window as usize,
+                window_size,
+                frame,
+                component.clone(),
+                &self.id(),
+            );
+
+            let mut ss = ServerSnapshot::<T>::with_capacity(window_size * 60);
+            ss.insert(frame, component.clone())
+                .expect("fresh one can't fail");
+            // (tw system sets correction logging for us later, if needed)
+            info!(
+                "Adding SS/CH to {:?} for {}\nInitial val @ {:?} = {:?}",
+                self.id(),
+                std::any::type_name::<T>(),
+                frame,
+                component.clone(),
+            );
+
+            self.insert((comp_history, ss));
+            Ok(InsertComponentResult::ComponentsAdded)
+        }
     }
 }

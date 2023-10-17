@@ -31,11 +31,11 @@ pub(crate) fn rekill_components_during_rollback<T: TimewarpComponent>(
 ) {
     let target_frame = game_clock.frame();
     for (entity, mut comp_history) in q.iter_mut() {
-        // info!(
-        //     "{entity:?} CH {} alive_range: {:?}",
-        //     comp_history.type_name(),
-        //     comp_history.alive_ranges
-        // );
+        trace!(
+            "rekill check? {entity:?} CH {} alive_range: {:?}",
+            comp_history.type_name(),
+            comp_history.alive_ranges
+        );
         if !comp_history.alive_at_frame(target_frame) {
             debug!(
                 "Re-removing {entity:?} -> {:?} during rollback for {:?}",

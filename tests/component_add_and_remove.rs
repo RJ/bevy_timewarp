@@ -144,9 +144,16 @@ fn component_add_and_remove() {
     // this tests the following two slightly different code paths:
     // * add component at old frame where entity never had this component before
     // * add component at old frame where entity used to have this comp but doesn't atm
-    app.world
-        .entity_mut(e1)
-        .insert(InsertComponentAtFrame::<Shield>::new(8, Shield));
+
+    let new_shield = Shield;
+
+    let mut ss_e1 = app.world.get_mut::<ServerSnapshot<Shield>>(e1).unwrap();
+    ss_e1.insert(8, new_shield);
+
+    // PANICs on purpose atm, don't support ICAF if SS present.
+    // app.world
+    //     .entity_mut(e1)
+    //     .insert(InsertComponentAtFrame::<Shield>::new(8, new_shield));
 
     tick(&mut app); // frame 10
 
@@ -159,7 +166,7 @@ fn component_add_and_remove() {
     );
 
     assert_eq!(app.comp_val_at::<Enemy>(e1, 8).unwrap().health, 5);
-    assert_eq!(app.comp_val_at::<Enemy>(e1, 9).unwrap().health, 5);
+    assert_eq!(app.comp_val_at::<Enemy>(e1, 9).unwrap().health, 5); // x
     assert_eq!(app.comp_val_at::<Enemy>(e1, 10).unwrap().health, 5);
 
     assert_eq!(app.world.get::<Enemy>(e1).unwrap().health, 5);

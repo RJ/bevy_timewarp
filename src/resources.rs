@@ -70,6 +70,7 @@ impl TimewarpConfig {
 #[derive(Resource, Debug, Default)]
 pub struct RollbackStats {
     pub num_rollbacks: u64,
+    pub range_faults: u64,
 }
 
 /// If this resource exists, we are doing a rollback. Insert it to initate one manually.

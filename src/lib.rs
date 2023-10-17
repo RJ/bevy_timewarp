@@ -295,12 +295,14 @@ impl Plugin for TimewarpPlugin {
                     TimewarpPrefixSet::DuringRollback.run_if(resource_exists::<Rollback>()),
                     TimewarpPrefixSet::ApplyJustInTimeComponents
                         .run_if(not(resource_exists::<Rollback>())),
+                    // -- apply_deferred -- //
                     TimewarpPrefixSet::CheckIfRollbackNeeded
                         .run_if(not(resource_exists::<Rollback>())),
                     // -- apply_deferred -- //
                     TimewarpPrefixSet::StartRollback.run_if(resource_added::<Rollback>()),
                     TimewarpPrefixSet::UnwrapBlueprints,
                     TimewarpPrefixSet::Last,
+                    // -- apply_deferred -- //
                 )
                     .chain(),
             )
@@ -312,29 +314,35 @@ impl Plugin for TimewarpPlugin {
             )
             .add_systems(
                 self.config.schedule(),
+                apply_deferred
+                    .after(TimewarpPrefixSet::ApplyJustInTimeComponents)
+                    .before(TimewarpPrefixSet::CheckIfRollbackNeeded),
+            )
+            .add_systems(
+                self.config.schedule(),
                 (|game_clock: Res<GameClock>, rb: Option<Res<Rollback>>| {
-                    info!("Prefix::First for {} {rb:?}", **game_clock + 1)
+                    trace!("Prefix::First for {} {rb:?}", **game_clock + 1)
                 })
                 .in_set(TimewarpPrefixSet::First),
             )
             .add_systems(
                 self.config.schedule(),
                 (|game_clock: Res<GameClock>, rb: Option<Res<Rollback>>| {
-                    info!("Prefix::Last for {} {rb:?}", **game_clock + 1)
+                    trace!("Prefix::Last for {} {rb:?}", **game_clock + 1)
                 })
                 .in_set(TimewarpPrefixSet::Last),
             )
             .add_systems(
                 self.config.schedule(),
                 (|game_clock: Res<GameClock>, rb: Option<Res<Rollback>>| {
-                    info!("Postfix::First {game_clock:?} {rb:?}");
+                    trace!("Postfix::First {game_clock:?} {rb:?}");
                 })
                 .in_set(TimewarpPostfixSet::First),
             )
             .add_systems(
                 self.config.schedule(),
                 (|game_clock: Res<GameClock>, rb: Option<Res<Rollback>>| {
-                    info!("Postfix::Last {game_clock:?} {rb:?}");
+                    trace!("Postfix::Last {game_clock:?} {rb:?}");
                 })
                 .in_set(TimewarpPostfixSet::Last),
             )
@@ -395,6 +403,12 @@ impl Plugin for TimewarpPlugin {
                 self.config.schedule(),
                 (systems::postfix_components::remove_descendents_from_despawning_entities)
                     .in_set(TimewarpPostfixSet::Components),
+            )
+            // flush commands at the very end, since they may be referencing entities which
+            // get despawned in PreUpdate next tick
+            .add_systems(
+                self.config.schedule(),
+                apply_deferred.after(TimewarpPostfixSet::Last),
             )
             // BoxedSystemSet implements IntoSystemSetConfig, but not IntoSystemSetConfigs
             // so for now, have to use the deprecated configure_set instead of configure_sets.

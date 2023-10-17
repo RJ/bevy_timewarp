@@ -168,7 +168,7 @@ fn despawn_revival_during_rollback() {
 
     // generate a rollback that should revive the component temporarily
     let mut ss_e2 = app.world.get_mut::<ServerSnapshot<Enemy>>(e1).unwrap();
-    ss_e2.insert(2, Enemy { health: 100 });
+    ss_e2.insert(2, Enemy { health: 100 }).unwrap();
 
     tick(&mut app); // frame 5 -- 1 of rollback_window until despawn
 
@@ -192,7 +192,7 @@ fn despawn_revival_during_rollback() {
     // even though the Enemy component doesn't exist on e1 now, we can see a rollback happened
     // because the buffered older values have changed in accordance with the ServerSnapshot:
     assert_eq!(app.comp_val_at::<Enemy>(e1, 2).unwrap().health, 100);
-    assert_eq!(app.comp_val_at::<Enemy>(e1, 3).unwrap().health, 99);
+    assert_eq!(app.comp_val_at::<Enemy>(e1, 3).unwrap().health, 99); // x
     assert!(
         app.comp_val_at::<Enemy>(e1, despawn_frame).is_none(),
         "should have been despawned"

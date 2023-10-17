@@ -22,31 +22,33 @@ pub(crate) fn rollback_initiated(
     timewarp_config: Res<TimewarpConfig>,
     mut commands: Commands,
 ) {
+    // during syncing large worlds, we kinda have to skip impossible rollbacks until things catch up
+    // TODO revise comment:
     // if we're trying to roll back further than our configured rollback window,
     // all sorts of things will fail spectacularly, so i'm just going to panic for now.
     // i think the way to handle this is in the game, if you get an update from the past older
     // than the window that you can't afford to ignore, like a reliable spawn message, then
     // perhaps modify the spawn frame to the oldest allowable frame within the window,
     // and rely on snapshots to sort you out.
-    if rb.range.end - rb.range.start > timewarp_config.rollback_window {
-        error!(
+    if rb.range.end - rb.range.start >= timewarp_config.rollback_window {
+        panic!(
             "⚠️⚠️⚠️ Attempted to rollback further than rollback_window: {rb:?} @ {:?}",
             game_clock.frame()
         );
-        error!("⚠️⚠️⚠️ Ignoring this rollback request. 🛼 ");
+        // error!("⚠️⚠️⚠️ Ignoring this rollback request. 🛼 ");
         // TODO this isn't really safe - what if there was an ICAF or ABAF and then it never
         // gets unpacked because it was outside the window.
         // perhaps we need to mark the RB as "desperate", rollback to the oldest frame,
         // and unpack anything destined for an even older (oob) frame that go around.
         // at least unpack the ABAF ones, maybe don't care about SS in a desperate rollback.
-        rb.abort();
-        commands.remove_resource::<Rollback>();
-        return;
+        // rb.abort();
+        // commands.remove_resource::<Rollback>();
+        // return;
     }
     // save original period for restoration after rollback completion
     rb.original_period = Some(fx.period);
     rb_stats.num_rollbacks += 1;
-    debug!("🛼 ROLLBACK RESOURCE ADDED ({}), reseting game clock from {:?} for {:?}, setting period -> 0 for fast fwd.", rb_stats.num_rollbacks, game_clock.frame(), rb);
+    info!("🛼 ROLLBACK RESOURCE ADDED (rb#{}), reseting game clock from {:?} for {:?}, setting period -> 0 for fast fwd.", rb_stats.num_rollbacks, game_clock.frame(), rb);
     // make fixed-update ticks free, ie fast-forward the simulation at max speed
     fx.period = Duration::ZERO;
     // the start of the rb range is the frame with the newly added authoritative data.
@@ -99,52 +101,57 @@ pub(crate) fn rollback_component<T: TimewarpComponent>(
             (false, false) => Provenance::DeadThenDead,
         };
 
-        let comp_at_frame = comp_hist.at_frame(rollback_frame);
-
-        if comp_at_frame.is_none() {
-            panic!(
-                "said it was alive.. {entity:?} {rollback_frame} {} {:?} {provenance:?}\n",
-                comp_hist.type_name(),
-                comp_hist.alive_ranges
-            );
-        }
-
-        let comp_at_frame = comp_at_frame.unwrap();
-
-        // .expect("Said it was alive");
+        trace!(
+            "⛳️ {entity:?} {} CH alive_ranges: {:?}",
+            comp_hist.type_name(),
+            comp_hist.alive_ranges
+        );
 
         match provenance {
             Provenance::DeadThenDead => {
-                info!(
-                    "{game_clock:?} rollback component {entity:?} {} {provenance:?} - NOOP",
-                    comp_hist.type_name()
+                trace!(
+                    "{game_clock:?} rollback component {entity:?} {} {provenance:?} - NOOP {:?}",
+                    comp_hist.type_name(),
+                    comp_hist.alive_ranges
                 );
             }
             Provenance::DeadThenAlive => {
-                info!(
+                trace!(
                     "{game_clock:?} rollback component {entity:?} {} {provenance:?} - REMOVE<T>",
                     comp_hist.type_name()
                 );
                 commands.entity(entity).remove::<T>();
             }
             Provenance::AliveThenAlive => {
-                let comp_val = comp_at_frame.clone();
-                info!(
+                let comp_at_frame = comp_hist.at_frame(rollback_frame);
+                if comp_at_frame.is_none() {
+                    let oldest_frame = comp_hist.values.oldest_frame();
+                    panic!("{game_clock:?} {entity:?} {provenance:?} {} rollback_frame: {rollback_frame} alive_ranges:{:?} rb:{rb:?} oldest value in comp_hist: {oldest_frame}\nocc:{:?}\n",
+                            comp_hist.type_name(), comp_hist.alive_ranges, comp_hist.values.frame_occupancy());
+                }
+                let comp_val = comp_at_frame.unwrap().clone();
+                trace!(
                     "{game_clock:?} rollback component {entity:?} {} {provenance:?} - REPLACE WITH {comp_val:?}",
                     comp_hist.type_name()
                 );
-                if let Some(mut opt_comp) = opt_comp {
-                    *opt_comp = comp_val;
+                if let Some(mut comp) = opt_comp {
+                    *comp = comp_val;
                 } else {
-                    warn!(
+                    // during new spawns this happens. not a bug.
+                    trace!(
                         "{entity:?} Actually having to insert for {comp_val:?} doesn't exist yet"
                     );
                     commands.entity(entity).insert(comp_val);
                 }
             }
             Provenance::AliveThenDead => {
-                let comp_val = comp_at_frame.clone();
-                info!(
+                let comp_at_frame = comp_hist.at_frame(rollback_frame);
+                if comp_at_frame.is_none() {
+                    panic!("{game_clock:?} {entity:?} {provenance:?} {} rollback_frame: {rollback_frame} alive_ranges:{:?} rb:{rb:?}",
+                            comp_hist.type_name(), comp_hist.alive_ranges);
+                }
+                let comp_val = comp_at_frame.unwrap().clone();
+                trace!(
                     "{game_clock:?} rollback component {entity:?} {} {provenance:?} - INSERT {comp_val:?}",
                     comp_hist.type_name()
                 );
