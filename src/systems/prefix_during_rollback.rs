@@ -28,13 +28,13 @@ pub(crate) fn record_component_death<T: TimewarpComponent>(
 
 /// during rollback, need to re-insert components that were removed, based on stored lifetimes.
 pub(crate) fn rebirth_components_during_rollback<T: TimewarpComponent>(
-    q: Query<(Entity, &ComponentHistory<T>), Without<T>>,
+    q: Query<(Entity, &ComponentHistory<T>, Option<&OriginFrame>), Without<T>>,
     game_clock: Res<GameClock>,
     mut commands: Commands,
     rb: Res<Rollback>,
 ) {
-    let target_frame = game_clock.frame() + 1;
-    for (entity, comp_history) in q.iter() {
+    for (entity, comp_history, opt_originframe) in q.iter() {
+        let target_frame = game_clock.frame().max(opt_originframe.map_or(0, |of| of.0));
         if comp_history.alive_at_frame(target_frame) {
             let comp_val = comp_history.at_frame(target_frame).unwrap_or_else(|| {
                 error!(

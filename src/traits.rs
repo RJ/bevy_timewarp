@@ -58,7 +58,7 @@ impl TimewarpTraits for App {
         );
         self.add_systems(
             schedule.clone(),
-            prefix_check_if_rollback_needed::trigger_rollback_when_blueprint_added::<T>
+            prefix_check_if_rollback_needed::request_rollback_for_blueprints::<T>
                 .before(prefix_check_if_rollback_needed::consolidate_rollback_requests)
                 .in_set(TimewarpPrefixSet::CheckIfRollbackNeeded),
         )
@@ -101,14 +101,6 @@ impl TimewarpTraits for App {
             )
                 .in_set(TimewarpPrefixSet::DuringRollback),
         );
-        self.add_systems(
-            schedule.clone(),
-            (
-                prefix_jit::apply_jit_icafs::<T, CORRECTION_LOGGING>,
-                prefix_jit::apply_jit_ss::<T>,
-            )
-                .in_set(TimewarpPrefixSet::ApplyJustInTimeComponents),
-        );
         // this may result in a Rollback resource being inserted.
         self.add_systems(
             schedule.clone(),
@@ -125,7 +117,7 @@ impl TimewarpTraits for App {
         );
         self.add_systems(
             schedule.clone(),
-            prefix_start_rollback::rollback_component::<T>
+            (prefix_start_rollback::rollback_component::<T>,)
                 .in_set(TimewarpPrefixSet::StartRollback)
                 .after(prefix_start_rollback::rollback_initiated),
         );
@@ -209,7 +201,7 @@ impl EntityMutICAF for EntityMut<'_> {
                 component.clone(),
             );
 
-            self.insert((comp_history, ss));
+            self.insert((comp_history, ss, TimewarpStatus::new(frame)));
             Ok(InsertComponentResult::ComponentsAdded)
         }
     }

@@ -20,7 +20,6 @@ pub(crate) fn rollback_initiated(
     mut fx: ResMut<FixedTime>,
     mut rb_stats: ResMut<RollbackStats>,
     timewarp_config: Res<TimewarpConfig>,
-    mut commands: Commands,
 ) {
     // during syncing large worlds, we kinda have to skip impossible rollbacks until things catch up
     // TODO revise comment:
@@ -48,14 +47,18 @@ pub(crate) fn rollback_initiated(
     // save original period for restoration after rollback completion
     rb.original_period = Some(fx.period);
     rb_stats.num_rollbacks += 1;
-    info!("🛼 ROLLBACK RESOURCE ADDED (rb#{}), reseting game clock from {:?} for {:?}, setting period -> 0 for fast fwd.", rb_stats.num_rollbacks, game_clock.frame(), rb);
+    // we wind clock back 1 past first resim frame, so we can load in data for the frame prior
+    // so we go into our first resim frame with components in the correct state.
+    let reset_game_clock_to = rb.range.start.saturating_sub(1);
+    info!("🛼 ROLLBACK RESOURCE ADDED (rb#{}), reseting game clock from {game_clock:?}-->{reset_game_clock_to} rb:{rb:?}", 
+                rb_stats.num_rollbacks);
     // make fixed-update ticks free, ie fast-forward the simulation at max speed
     fx.period = Duration::ZERO;
     // the start of the rb range is the frame with the newly added authoritative data.
-    // since increment happens after the timewarp prefix sets, we set the clock to this value,
+    // since increment happens after the timewarp prefix sets, we set the clock to this value - 1,
     // knowing that it will immediately be incremented to the next frame we need to simulate.
     // (once we've loaded in historical component values)
-    game_clock.set(rb.range.start);
+    game_clock.set(reset_game_clock_to);
 }
 
 // for clarity when rolling back components
@@ -75,22 +78,38 @@ enum Provenance {
 pub(crate) fn rollback_component<T: TimewarpComponent>(
     rb: Res<Rollback>,
     // T is None in case where component removed but ComponentHistory persists
-    mut q: Query<(Entity, Option<&mut T>, &ComponentHistory<T>), Without<NotRollbackable>>,
+    mut q: Query<
+        (
+            Entity,
+            Option<&mut T>,
+            &ComponentHistory<T>,
+            Option<&OriginFrame>,
+        ),
+        Without<NotRollbackable>,
+    >,
     mut commands: Commands,
     game_clock: Res<GameClock>,
 ) {
     if rb.aborted() {
         return;
     }
-    let rollback_frame = rb.range.start;
 
-    assert_eq!(
-        game_clock.frame(),
-        rollback_frame,
-        "game clock should already be set back by rollback_initiated"
-    );
+    for (entity, opt_comp, comp_hist, opt_originframe) in q.iter_mut() {
+        let rollback_frame = if let Some(OriginFrame(of)) = opt_originframe {
+            game_clock.frame().max(*of)
+        } else {
+            **game_clock
+        };
 
-    for (entity, opt_comp, comp_hist) in q.iter_mut() {
+        let prefix = if rollback_frame != **game_clock {
+            warn!(
+                "😬 rollback_component {entity:?} {game_clock:?} rollback_frame:{rollback_frame} {}",
+                comp_hist.type_name()
+            );
+            "😬"
+        } else {
+            ""
+        };
         let provenance = match (
             comp_hist.alive_at_frame(rollback_frame),
             comp_hist.alive_at_frame(**game_clock),
@@ -102,7 +121,7 @@ pub(crate) fn rollback_component<T: TimewarpComponent>(
         };
 
         trace!(
-            "⛳️ {entity:?} {} CH alive_ranges: {:?}",
+            "⛳️ {prefix} {entity:?} {} CH alive_ranges: {:?}",
             comp_hist.type_name(),
             comp_hist.alive_ranges
         );
@@ -110,28 +129,34 @@ pub(crate) fn rollback_component<T: TimewarpComponent>(
         match provenance {
             Provenance::DeadThenDead => {
                 trace!(
-                    "{game_clock:?} rollback component {entity:?} {} {provenance:?} - NOOP {:?}",
+                    "{prefix} {game_clock:?} rollback component {entity:?} {} {provenance:?} - NOOP {:?}",
                     comp_hist.type_name(),
                     comp_hist.alive_ranges
                 );
             }
             Provenance::DeadThenAlive => {
                 trace!(
-                    "{game_clock:?} rollback component {entity:?} {} {provenance:?} - REMOVE<T>",
+                    "{prefix} {game_clock:?} rollback component {entity:?} {} {provenance:?} - REMOVE<T>",
                     comp_hist.type_name()
                 );
                 commands.entity(entity).remove::<T>();
             }
             Provenance::AliveThenAlive => {
+                // TODO we might want a general way to check the oldest frame for this comp,
+                // and if we dont have the requested frame, use the oldest instead?
+                // assuming a request OLDER than the requested can't be serviced.
                 let comp_at_frame = comp_hist.at_frame(rollback_frame);
+
+                // debugging
                 if comp_at_frame.is_none() {
                     let oldest_frame = comp_hist.values.oldest_frame();
-                    panic!("{game_clock:?} {entity:?} {provenance:?} {} rollback_frame: {rollback_frame} alive_ranges:{:?} rb:{rb:?} oldest value in comp_hist: {oldest_frame}\nocc:{:?}\n",
+                    panic!("{prefix} {game_clock:?} {entity:?} {provenance:?} {} rollback_frame: {rollback_frame} alive_ranges:{:?} rb:{rb:?} oldest value in comp_hist: {oldest_frame}\nocc:{:?}\n",
                             comp_hist.type_name(), comp_hist.alive_ranges, comp_hist.values.frame_occupancy());
                 }
+                //
                 let comp_val = comp_at_frame.unwrap().clone();
                 trace!(
-                    "{game_clock:?} rollback component {entity:?} {} {provenance:?} - REPLACE WITH {comp_val:?}",
+                    "{prefix} {game_clock:?} rollback component {entity:?} {} {provenance:?} - REPLACE WITH {comp_val:?}",
                     comp_hist.type_name()
                 );
                 if let Some(mut comp) = opt_comp {
@@ -139,20 +164,22 @@ pub(crate) fn rollback_component<T: TimewarpComponent>(
                 } else {
                     // during new spawns this happens. not a bug.
                     trace!(
-                        "{entity:?} Actually having to insert for {comp_val:?} doesn't exist yet"
+                        "{prefix} {entity:?} Actually having to insert for {comp_val:?} doesn't exist yet"
                     );
                     commands.entity(entity).insert(comp_val);
                 }
             }
             Provenance::AliveThenDead => {
                 let comp_at_frame = comp_hist.at_frame(rollback_frame);
+                // debugging
                 if comp_at_frame.is_none() {
                     panic!("{game_clock:?} {entity:?} {provenance:?} {} rollback_frame: {rollback_frame} alive_ranges:{:?} rb:{rb:?}",
                             comp_hist.type_name(), comp_hist.alive_ranges);
                 }
+                //
                 let comp_val = comp_at_frame.unwrap().clone();
                 trace!(
-                    "{game_clock:?} rollback component {entity:?} {} {provenance:?} - INSERT {comp_val:?}",
+                    "{prefix} {game_clock:?} rollback component {entity:?} {} {provenance:?} - INSERT {comp_val:?}",
                     comp_hist.type_name()
                 );
                 commands.entity(entity).insert(comp_val);

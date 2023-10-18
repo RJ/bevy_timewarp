@@ -131,7 +131,7 @@ fn basic_rollback() {
     // our app's netcode would insert the authoritative (slightly outdated) values into ServerSnapshots:
 
     let mut ss_e2 = app.world.get_mut::<ServerSnapshot<Enemy>>(e2).unwrap();
-    ss_e2.insert(2, Enemy { health: 100 });
+    ss_e2.insert(2, Enemy { health: 100 }).unwrap();
 
     // this message will be processed in the next tick - frame 5.
 

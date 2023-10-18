@@ -71,6 +71,7 @@ impl TimewarpConfig {
 pub struct RollbackStats {
     pub num_rollbacks: u64,
     pub range_faults: u64,
+    pub non_rollback_updates: u64,
 }
 
 /// If this resource exists, we are doing a rollback. Insert it to initate one manually.
@@ -78,11 +79,12 @@ pub struct RollbackStats {
 /// in one of the following ways:
 ///
 /// * You insert a `InsertComponentAtFrame<T>` for a past frame
+/// * You insert a `AssembleBlueprintAtFrame<T>` for a past frame
 /// * You supply ServerSnapshot<T> data for a past frame
 ///
 #[derive(Resource, Debug, Clone)]
 pub struct Rollback {
-    /// the range of frames, start being the target we rollback to
+    /// the range of frames, start being the target we resimulate first
     pub range: Range<FrameNumber>,
     /// we preserve the original FixedUpdate period here and restore after rollback completes.
     /// (during rollback, we set the FixedUpdate period to 0.0, to effect fast-forward resimulation)
@@ -90,14 +92,21 @@ pub struct Rollback {
     aborted: bool,
 }
 impl Rollback {
-    /// The range start..end contains all values with start <= x < end. It is empty if start >= end.
-    pub fn new(start: FrameNumber, end: FrameNumber) -> Self {
+    /// `end` is the last frame to be resimulated
+    pub fn new(
+        first_frame_to_resimulate: FrameNumber,
+        last_frame_to_resimulate: FrameNumber,
+    ) -> Self {
         Self {
-            range: Range { start, end },
+            range: Range {
+                start: first_frame_to_resimulate,
+                end: last_frame_to_resimulate,
+            },
             original_period: None,
             aborted: false,
         }
     }
+    /// you can't really abort rollbacks, this is for some debugging
     pub fn abort(&mut self) {
         self.aborted = true;
     }

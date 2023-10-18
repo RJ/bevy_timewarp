@@ -217,13 +217,6 @@ pub enum TimewarpPrefixSet {
 
     /// Doesn't run in rollback
     ///
-    /// Applies ICAFs (unwraps) for the current frame, if not in rollback.
-    /// this is for late arriving updates that didn't warrant a rollback, but need to be
-    /// available this frame.
-    ApplyJustInTimeComponents,
-
-    /// Doesn't run in rollback
-    ///
     /// Contains:
     /// * detect_misuse_of_icaf<T>
     /// * trigger_rollback_when_snapshot_added<T>
@@ -263,7 +256,16 @@ pub enum TimewarpPostfixSet {
 /// systems that want to initiate a rollback write one of these to
 /// the Events<RollbackRequest> queue.
 #[derive(Event, Debug)]
-pub struct RollbackRequest(pub FrameNumber);
+pub struct RollbackRequest(FrameNumber);
+
+impl RollbackRequest {
+    pub fn resimulate_this_frame_onwards(frame: FrameNumber) -> Self {
+        Self(frame)
+    }
+    pub fn frame(&self) -> FrameNumber {
+        self.0
+    }
+}
 
 pub struct TimewarpPlugin {
     config: TimewarpConfig,
@@ -292,32 +294,47 @@ impl Plugin for TimewarpPlugin {
                     TimewarpPrefixSet::First,
                     TimewarpPrefixSet::CheckIfRollbackComplete
                         .run_if(resource_exists::<Rollback>()),
-                    TimewarpPrefixSet::DuringRollback.run_if(resource_exists::<Rollback>()),
-                    TimewarpPrefixSet::ApplyJustInTimeComponents
-                        .run_if(not(resource_exists::<Rollback>())),
                     // -- apply_deferred -- //
                     TimewarpPrefixSet::CheckIfRollbackNeeded
                         .run_if(not(resource_exists::<Rollback>())),
                     // -- apply_deferred -- //
                     TimewarpPrefixSet::StartRollback.run_if(resource_added::<Rollback>()),
+                    // -- apply_deferred -- //
+                    TimewarpPrefixSet::DuringRollback.run_if(resource_exists::<Rollback>()),
                     TimewarpPrefixSet::UnwrapBlueprints,
                     TimewarpPrefixSet::Last,
                     // -- apply_deferred -- //
                 )
                     .chain(),
             )
+            //
+            // APPLY DEFERREDS
+            //
             .add_systems(
                 self.config.schedule(),
                 apply_deferred
                     .after(TimewarpPrefixSet::CheckIfRollbackComplete)
+                    .before(TimewarpPrefixSet::CheckIfRollbackNeeded),
+            )
+            .add_systems(
+                self.config.schedule(),
+                apply_deferred
+                    .after(TimewarpPrefixSet::CheckIfRollbackNeeded)
                     .before(TimewarpPrefixSet::StartRollback),
             )
             .add_systems(
                 self.config.schedule(),
                 apply_deferred
-                    .after(TimewarpPrefixSet::ApplyJustInTimeComponents)
-                    .before(TimewarpPrefixSet::CheckIfRollbackNeeded),
+                    .after(TimewarpPrefixSet::StartRollback)
+                    .before(TimewarpPrefixSet::DuringRollback),
             )
+            //
+            // END APPLY DEFERREDS
+            //
+            // --
+            //
+            // Debug headers
+            //
             .add_systems(
                 self.config.schedule(),
                 (|game_clock: Res<GameClock>, rb: Option<Res<Rollback>>| {
@@ -346,14 +363,13 @@ impl Plugin for TimewarpPlugin {
                 })
                 .in_set(TimewarpPostfixSet::Last),
             )
-            .add_systems(
-                self.config.schedule(),
-                systems::sanity_check.in_set(TimewarpPrefixSet::First),
-            )
-            .add_systems(
-                self.config.schedule(),
-                apply_deferred.in_set(TimewarpPrefixSet::DuringRollback),
-            )
+            //
+            // End debug headers
+            //
+            // .add_systems(
+            //     self.config.schedule(),
+            //     systems::sanity_check.in_set(TimewarpPrefixSet::First),
+            // )
             .add_systems(
                 self.config.schedule(),
                 (

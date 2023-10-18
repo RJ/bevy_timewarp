@@ -112,7 +112,8 @@ fn component_add_and_remove() {
     );
 
     let prb = app.world.get_resource::<PreviousRollback>().unwrap();
-    assert_eq!(prb.0.range.start, 3);
+    // last rollback should have resimualted from 4, since we modified something at 3.
+    assert_eq!(prb.0.range.start, 4);
 
     // health should not have reduced since shield was added at f3
     assert_eq!(app.comp_val_at::<Enemy>(e1, 5).unwrap().health, 7);

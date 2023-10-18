@@ -62,22 +62,11 @@ impl<T: TimewarpComponent> AssembleBlueprintAtFrame<T> {
     }
 }
 
-/// Components that should be inserted at specific frames get wrapped up in in one of these
-/// then unwrapped (ie, inserted into the entity) at the specified `frame`, and the
-/// `UnwrapAtFrame<T>` is removed.
-#[derive(Component, Debug)]
-pub struct UnwrapAtFrame<T: Component + Clone + std::fmt::Debug> {
-    pub component: T,
-    pub frame: FrameNumber,
-}
-impl<T: Component + Clone + std::fmt::Debug> UnwrapAtFrame<T> {
-    pub fn new(frame: FrameNumber, component: T) -> Self {
-        Self { component, frame }
-    }
-    pub fn type_name(&self) -> &str {
-        std::any::type_name::<T>()
-    }
-}
+/// presence on an entity during rollback means there will be no older values available,
+/// since the entity is being assembled from blueprint this frame.
+/// so we load in component values matching the origin frame (not one frame prior, like usual)
+#[derive(Component, Debug, Clone)]
+pub struct OriginFrame(pub FrameNumber);
 
 /// entities with components that were registered with error correction logging will receive
 /// one of these components, updated with before/after values when a simulation correction
