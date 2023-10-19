@@ -294,7 +294,10 @@ wipe removed component queue, remove components which shouldn't exist at this fr
 Systems that initiate rollbacks write a `RollbackRequest` to an event queue, specifying the frame they
 wish to start resimulating from. These are in the `CheckIfRollbackNeeded` set.
 
-All rollback requests are consolidated, and a `Rollback` resource is written, using the oldest of the requested frames.
+All rollback requests are consolidated, and a `Rollback` resource is written. The `RollbackConsolidationStrategy` from `TimewarpConfig`
+determines if the oldest or newest frame from the list of requests is used.
+If you only receive entire-world updates at a time, taking the newest frame requested is optimal. 
+This is how replicon currently works, and is the default.
 
 If we need to resimulate from frame `N` onwards, before we start simulating that frame, we load in
 stored component values from frame `N - 1`. 
@@ -305,11 +308,11 @@ We also unwrap any blueprints (ABAF) for frame `N`.
 
 The server sends replicon data containing component values in PostUpdate, after physics.
 
-So when the client receives a packet saying that a component value is X at frame N, that means
-the value was X on the server, after frame N was simulated.
+So when the client receives a packet saying that a component value is X at frame `N`, that means
+the value was X on the server, after frame `N` was simulated.
 
-So if the client receives this, they can resimulate from frame N+1, and set the component to X
-before starting - representing the correct state at the end of frame N.
+So if the client receives this, they can resimulate from frame `N+1`, and set the component to X
+before starting - representing the correct state at the end of frame `N`.
 
 ### Spawning via blueprint
 
@@ -323,7 +326,8 @@ physics that position might have changed to X',Y' before replication data was se
 On clients, when we get a player blueprint for frame 100 we'll be rolling back to 101,
 and inserting the replicated Pos value@100 before we start simulating 101.
 But we'll only end up adding the (non-replicated) collider during bp assembly in frame 101.
-this is ok, since the replicated components are correct for that frame.
+Although not optimal, this is correct – the replicated components are correct for that frame.
+
 Anything the player's collider interacted with during physics on frame 100 on the server may end up
 requiring a correction on the client (since client couldn't have simualted that). but that's fine.
 
@@ -338,184 +342,27 @@ it on the client.
 HOWEVER then we get stale data left over in the blueprint (like the pos from when it was spawned) and
 we can't really filter or control how replicon sends these bp compoents to clients.
 we don't want to continually update the BPs copying in fresh data, just so new players can spawn
-stuff from existing blueprints.
+stuff from existing blueprints. kinda want a way to dynamically create a blueprint-bundle just for
+replicating to new clients.
 
 that's annoying. 
 
 that's why we spawn blueprints the next frame on the client.
 
-blueprints are not for things like bullets that get predicted and spammed, so it's ok 🥺
-
-
-
-
-## What follows.....
-
-is the ravings of a mad man. needs organising and culling.
-<hr>
-
-## Deserializing a timewarp component
-
-The process for deserializing timewarp-registered components is as follows.
-
-In `PreUpdate` on the client, when it receives a component update, that update is for the included
-`RepliconTick`. That is the server's post-physics value for that frame (note the server broadcasts replication data AFTER the physics sets).
-
-Also note, in the client's `PreUpdate` the frame number (`GameClock.frame()`) represents the previous FixedUpdate to run,
-and will be incremented in the First set in FixedUpdate next time it runs. In other words, the client has already simulated the frame number seen in PreUpdate.
-
-### A Packet Arrives for RepliconTick 100
-
-The deserialize function needs to tell timewarp we have authoritative data for RepliconTick 100.
-It checks if the associated entity for the compoent has a `ServerSnapshot<Position>` – if so, it does
-`ss.insert(100, comp_data)`, otherwise it inserts a `InsertComponentAtFrame(100, comp_data)` component.
+This isn't a concern for bullets that get predicted and spammed, so it's ok 🥺
 
 <hr>
 
+| __WARNING__ unedited ravings below this line that haven't yet necessarily coalesced into useful code
 
-In `PreUpdate` a `Position` component replication update is deserialized. The `RepliconTick` is 100. The `Entity` for the component is specified, but it might have just been spawned by replicon in response to a server spawn, or perhaps it's an existing entity.
+<hr>
 
-Since this is a post-physics value at frame 100, we don't want to see it at the start of our FixedUpdate unless our frame number is 101.
+## Client INPUT DELAY means other players' inputs can arrive early
 
-The client is supposed to be ahead of the server.
-
-but let's say the client's preup.f is 100, about to start frame 101. The client is somehow not ahead of the server enough.
-We need to see it at the start of fixed frame 101, and we can't wait for TW sets after our loop to unpack it. 
-We either ICAF or SS.insert it, and rely on TW.prefix to unpack immediately at the start of our loop.
-this shouldn't trigger a rollback. (or we insert directly in the deser? then we lose info that it's server-authoritative tho)
-
-
-what if client's preup.f is 101, about to simulate 102?
-we needed it to exist at the start of the last frame, so we'll need to rollback.
-SS.insert or ICAF - this should trigger a rollback by settings the clock to 100,
-then enting the start of fixedupdate, which should apply values from 100 to components.
-then we increment to 101 as normal.
-
-
-
-
-### Does the entity already have ServerSnapshot&lt;Position&gt;?
-If so, it's not a freshly spawned entity.
-Write to the SS: `ServerSnapshot<Position>.insert(packet.replicon_tick, packet.component_value)`
-
-
-### No SS
-
-Insert a timewarp component: `InsertComponentAtFrame(packet.replicon_frame, packet.component_value)`
-
-
-## Deserializing a blueprint component
-
-The process for deserailzing a blueprint component – one which is not subject to rollback by timewarp,
-but might trigger creation of timewarp-registered components in the blueprint factory function – is as follows.
-
-
-
-
-
-
-### notes on blueprint construction in the past, and rollbacks
-
-when the server sends an update for pos@100, we need to resimulate frame 101 onwards, since it means
-we have authoritative data at the end of frame 100, and frame 101- needs resimulating. In this case,
-we;d make a RollbackRequest(101) - ie, resimualte from frame 101.
-
-as part of handling the rollback request, tw will load in data for frame 100, then proceed to simulate 101.
-
-when we get a blueprint at frame 100, it means the server assembled the blueprint during frame 100.
-so if we want to also assemble it then, we need to resimulate frame 100. this implies we should load
-in all comp data from 99, then resimulate 100. ie RollbackRequest(100).
-
-however replicon is also sending new component data created when that blueprint was assembled,
-so you might get a pos@100 in the same packet as the BP@100.
-
-
-when we get a pos@100 for an existing entity, we should do a RollbackRequest(101).
-ie, load in compo data from 100, including our newly arrived pos@100, then resim 101-.
-
-
-when we get a BP@100, it means the server assembled the BP on frame 100, so we have to resimulate 100
-ie RollbackRequest(100).
-
-blueprints are a bit special because the associated pos got created alongside the BPs mid frame,
-so we actually want to load in pos@100 too - pos@99 won't exist, the BP created the pos.
-
-but if we are resimulating 100, we want all other components to be loaded back to the value @99.
-
-during assembly of bp we could yoink the values for that frame out of SS and insert? hacky.
-
-upon receiving any pos data into a client entity wthout the SS component, we could copy the value to @99 too? hacky.
-
-We could insert a OriginFrame(f=100) component to the entity, and in the system that loads in
-compo data in start_rollback, if the marker is present, and f matches, load data for the exact frame?
-ie change the loading in logic in that case.
-
-normally if we RollbackReqest(100) it means load in compos from 99.
-if the BP marker is present, it means load in compos from 100?
-
-shit maybe we can get this from the comp_hist or ss ? if we're on the very first birth frame.
-
-what if assumed the the origin frame was the frame passed to the CH constructor?
-
-### holup..
-
-a BP@100 along with pos@100 means, on the server, during f100, the bp was assembled. ie -
-an entity was spawned with various components including pos. then during after physics the pos
-would have been stepped forward, then the replication data sent (pos@100 and bp@100 and other bp components@100).
-
-so the original pos value the bp assembly fn chose would never be rendered, because it's stepped forward
-in physics, before rending in postupdate.
-
-so actually constructing the BP stuff like a normal component, where if you recv a BP@100 (and pos@100) you would rollback to 
-101, and bp@100/pos@100 gets loaded in first. 
-
-meaning if you recv the bp@100 in prefix, write it to an ABAF(f=100).
-in prefix, if the clock == 100, unwrap. it should exist at the start of 101.
-
-
-### Server
-
-gamesimulation: frame 100, fire input. blueprint is created with bullet pos=0
-physics: steps bullet to pos=1
-sending: sends bp@100, pos@100=1
-
-client preupdate, f= 110. receives bp@100m pos@100=1.
-  deser code writes pos to ss@100, and inserts bp to ABAF(f=100).
-  in tw prefix, issues a rollbackrequest(101)
-
-client tw prefix, handles rollback to 101. range -> 101..110.
-clock set to 100
-rollback components (sets pos@100 for our bp entity)
-unwrap bp (unwraps bp@100)
-
-enters fixedupdate, clock ticks to 101
-bp assembled, pos exists in the f100 state.
-correct f101 setup, so pos at 102 should match server's.
-
-resimulate loop..
-
-### what about low-lag client
-
-server:
-
-gamesimulation: frame 100, fire input. blueprint is created with bullet pos=0
-physics: steps bullet to pos=1
-sending: sends bp@100, pos@100=1
-
-client:
-
-client preupdate, f= 110. receives bp@100m pos@100=1.
-  deser code writes pos to ss@100, and inserts bp to ABAF(f=100).
-  in tw prefix, issues a rollbackrequest(101)
-
-
-## oh INPUT DELAY means other players' inputs can arrive before @pos 
-
-possible to get a player's input for a future frame before getting the component data, ie
-before the server simulates and sends it. 
+As a client it's possible to get a player's input for a future frame before getting the component data, ie
+before you simulates that frame.
 
 A low lag player with a 3 frame input delay will send inputs for frame 103 to the server while the server is doing frame 101, and the server will rebroadcast, so you might get them a frame before needed on a remote client.
-
 
 so perhaps we should be locally simulating the bullet spawn for remote players too somehow?
 
@@ -530,7 +377,7 @@ when the server does the bp assembly, it will have the prespawned entity associa
 assembles into that entity.
 
 Maybe all firing should work this way, rather than apply_inputs doing it? 
-apply inputs makes sense for thrusting and rotating etc, but when you need an associated entity it's different.
+apply inputs makes sense for thrusting and rotating etc, but when you need a new entity it's different.
 
 FireIntent<Bullet>(client_id, frame, bullet_blueprint) component ? could do the same on the client, since the client also prespawns
 entities to send them to the server, for matching up. can add the Prediction comp to that too to clean up misfires.
