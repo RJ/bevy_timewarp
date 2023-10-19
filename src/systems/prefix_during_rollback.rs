@@ -8,7 +8,7 @@ use bevy::prelude::*;
 
 */
 
-/// when components are removed, we log the death frame - doesnt run in rollback
+/// when components are removed, we log the death frame
 pub(crate) fn record_component_death<T: TimewarpComponent>(
     mut removed: RemovedComponents<T>,
     mut q: Query<&mut ComponentHistory<T>>,

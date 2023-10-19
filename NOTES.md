@@ -95,7 +95,7 @@ then runs the physics update sets, then broadcasts the new position of objects.
 </tr>
 </table>
 
-## Client
+## Client Frame
 
 The client tries to be a few frames ahead of the server's simulation, such that inputs for
 frame F arrive by frame F-1 on the server.

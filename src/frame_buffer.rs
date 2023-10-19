@@ -79,7 +79,7 @@ where
             return;
         }
         if let Some(index) = self.index(frame) {
-            self.entries.drain(0..index);
+            self.entries.drain(0..index.min(self.entries.len()));
             self.front_frame = frame;
         } else {
             error!("remove_entries_newer_than {frame} failed, no index.");

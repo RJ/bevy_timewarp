@@ -40,7 +40,6 @@ pub(crate) fn rollback_initiated(
         // perhaps we need to mark the RB as "desperate", rollback to the oldest frame,
         // and unpack anything destined for an even older (oob) frame that go around.
         // at least unpack the ABAF ones, maybe don't care about SS in a desperate rollback.
-        // rb.abort();
         // commands.remove_resource::<Rollback>();
         // return;
     }
@@ -90,10 +89,6 @@ pub(crate) fn rollback_component<T: TimewarpComponent>(
     mut commands: Commands,
     game_clock: Res<GameClock>,
 ) {
-    if rb.aborted() {
-        return;
-    }
-
     for (entity, opt_comp, comp_hist, opt_originframe) in q.iter_mut() {
         let rollback_frame = if let Some(OriginFrame(of)) = opt_originframe {
             game_clock.frame().max(*of)

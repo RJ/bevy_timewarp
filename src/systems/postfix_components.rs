@@ -6,6 +6,11 @@ use bevy::prelude::*;
     NOTE: Timewarp Postfix Systems run AFTER physics.
 */
 
+// debugging..
+fn debug_type<T: TimewarpComponent>() -> bool {
+    std::any::type_name::<T>().contains("::Position")
+}
+
 /// despawn marker means remove all useful components, pending actual despawn after
 /// ROLLBACK_WINDOW frames have elapsed.
 pub(crate) fn remove_components_from_despawning_entities<T: TimewarpComponent>(
@@ -24,18 +29,7 @@ pub(crate) fn remove_components_from_despawning_entities<T: TimewarpComponent>(
         // record_component_death looks at RemovedComponents and will catch this, and
         // register the death (ie, comphist.report_death_at_frame)
         commands.entity(entity).remove::<T>();
-
-        ch.report_death_at_frame(game_clock.frame()); ///// RJRJRJ was in place for smooth game. investigate.
-    }
-}
-
-pub(crate) fn remove_descendents_from_despawning_entities(
-    q: Query<Entity, Added<DespawnMarker>>,
-    mut commands: Commands,
-) {
-    for entity in q.iter() {
-        trace!("NOT REALLY Despawn descendants of {entity:?} due to added despawn marker");
-        // commands.entity(entity).despawn_descendants();
+        ch.report_death_at_frame(game_clock.frame());
     }
 }
 
@@ -84,6 +78,9 @@ pub(crate) fn record_component_history<T: TimewarpComponent>(
                 }
             }
         }
+        // if debug_type::<T>() {
+        //     info!("Recording Position {entity:?} @ {game_clock:?}");
+        // }
         // the main point of this system is just to save the component value to the buffer:
         // insert() does some logging
         match comp_hist.insert(game_clock.frame(), comp.clone(), &entity) {
@@ -122,7 +119,7 @@ pub(crate) fn add_timewarp_components<T: TimewarpComponent, const CORRECTION_LOG
         if CORRECTION_LOGGING {
             comp_history.enable_correction_logging();
         }
-        debug!(
+        trace!(
             "Adding ComponentHistory<> to {e:?} for {:?}\nInitial val @ {:?} = {:?}",
             std::any::type_name::<T>(),
             game_clock.frame(),

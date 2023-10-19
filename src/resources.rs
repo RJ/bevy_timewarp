@@ -89,7 +89,6 @@ pub struct Rollback {
     /// we preserve the original FixedUpdate period here and restore after rollback completes.
     /// (during rollback, we set the FixedUpdate period to 0.0, to effect fast-forward resimulation)
     pub original_period: Option<Duration>,
-    aborted: bool,
 }
 impl Rollback {
     /// `end` is the last frame to be resimulated
@@ -103,15 +102,24 @@ impl Rollback {
                 end: last_frame_to_resimulate,
             },
             original_period: None,
-            aborted: false,
         }
     }
-    /// you can't really abort rollbacks, this is for some debugging
-    pub fn abort(&mut self) {
-        self.aborted = true;
+}
+
+/// systems that want to initiate a rollback write one of these to
+/// the Events<RollbackRequest> queue.
+#[derive(Event, Debug)]
+pub struct RollbackRequest(FrameNumber);
+
+impl RollbackRequest {
+    pub fn resimulate_this_frame_onwards(frame: FrameNumber) -> Self {
+        if frame == 0 {
+            warn!("RollbackRequest(0)!");
+        }
+        Self(frame)
     }
-    pub fn aborted(&self) -> bool {
-        self.aborted
+    pub fn frame(&self) -> FrameNumber {
+        self.0
     }
 }
 

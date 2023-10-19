@@ -198,7 +198,6 @@ pub mod prelude {
     pub use crate::traits::*;
     pub use crate::TimewarpPlugin;
     pub type FrameNumber = u32;
-    pub use super::RollbackRequest;
     pub use crate::TimewarpPostfixSet;
     pub use crate::TimewarpPrefixSet;
 }
@@ -251,20 +250,6 @@ pub enum TimewarpPostfixSet {
     Components,
     DuringRollback,
     Last,
-}
-
-/// systems that want to initiate a rollback write one of these to
-/// the Events<RollbackRequest> queue.
-#[derive(Event, Debug)]
-pub struct RollbackRequest(FrameNumber);
-
-impl RollbackRequest {
-    pub fn resimulate_this_frame_onwards(frame: FrameNumber) -> Self {
-        Self(frame)
-    }
-    pub fn frame(&self) -> FrameNumber {
-        self.0
-    }
 }
 
 pub struct TimewarpPlugin {
@@ -414,11 +399,6 @@ impl Plugin for TimewarpPlugin {
                 self.config.schedule(),
                 systems::postfix_last::despawn_entities_with_elapsed_despawn_marker
                     .in_set(TimewarpPostfixSet::Last),
-            )
-            .add_systems(
-                self.config.schedule(),
-                (systems::postfix_components::remove_descendents_from_despawning_entities)
-                    .in_set(TimewarpPostfixSet::Components),
             )
             // flush commands at the very end, since they may be referencing entities which
             // get despawned in PreUpdate next tick

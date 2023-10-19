@@ -128,8 +128,7 @@ impl TimewarpTraits for App {
         self.add_systems(
             schedule.clone(),
             (
-                postfix_components::remove_components_from_despawning_entities::<T>
-                    .after(postfix_components::remove_descendents_from_despawning_entities),
+                postfix_components::remove_components_from_despawning_entities::<T>,
                 postfix_components::record_component_history::<T>,
                 postfix_components::add_timewarp_components::<T, CORRECTION_LOGGING>,
                 postfix_components::record_component_birth::<T>,

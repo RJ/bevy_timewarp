@@ -49,6 +49,16 @@ pub(crate) fn apply_snapshots_and_maybe_rollback<T: TimewarpComponent>(
             .at_frame(snap_frame)
             .expect("snap_frame must have a value here");
 
+        // we're in preudpate, the game clock is about to be incremented.
+        // so if the snap frame = current clock, we need it inserted right now without rolling back
+        // in this case, we don't need to write to comp_hist either, it will happen normally at the end of the frame.
+        if snap_frame == **game_clock {
+            trace!("Inserting latecomer {entity:?} {comp_from_snapshot:?} @ {snap_frame}");
+            commands.entity(entity).insert(comp_from_snapshot.clone());
+            rb_stats.non_rollback_updates += 1;
+            continue;
+        }
+
         // check if our historical value for the snap_frame is the same as what snapshot says
         // because if they match, we predicted successfully, and there's no need to rollback.
         if let Some(stored_comp_val) = comp_hist.at_frame(snap_frame) {
@@ -79,15 +89,6 @@ pub(crate) fn apply_snapshots_and_maybe_rollback<T: TimewarpComponent>(
             info!("Setting liveness for {snap_frame} {entity:?} {comp_from_snapshot:?} ");
             comp_hist.report_birth_at_frame(snap_frame);
             assert!(comp_hist.at_frame(snap_frame).is_some());
-        }
-
-        // we're in preudpate, the game clock is about to be incremented.
-        // so if the snap frame = current clock, we need it inserted right now without rolling back.
-        if snap_frame == **game_clock {
-            debug!("Inserting latecomer {entity:?} {comp_from_snapshot:?} @ {snap_frame}");
-            commands.entity(entity).insert(comp_from_snapshot.clone());
-            rb_stats.non_rollback_updates += 1;
-            continue;
         }
 
         if snap_frame < **game_clock {
@@ -173,7 +174,7 @@ pub(crate) fn request_rollback_for_blueprints<T: TimewarpComponent>(
         // all we have to do is trigger a rollback, and it'll be unpacked for us.
         if snap_frame < **game_clock {
             debug!(
-                "{game_clock:?} {entity:?} TRIGGERING ROLLBACK to {snap_frame} due to added blueprint: {abaf:?}"
+                "{game_clock:?} {entity:?} Requesting rollback for blueprint with snap_frame:{snap_frame} - {abaf:?}"
             );
             rb_ev.send(RollbackRequest::resimulate_this_frame_onwards(
                 snap_frame + 1,
@@ -185,20 +186,49 @@ pub(crate) fn request_rollback_for_blueprints<T: TimewarpComponent>(
 /// potentially-concurrent systems request rollbacks by writing a request
 /// to the Events<RollbackRequest>, which we drain and use the smallest
 /// frame that was requested - ie, covering all requested frames.
+///
 pub(crate) fn consolidate_rollback_requests(
     mut rb_events: ResMut<Events<RollbackRequest>>,
     mut commands: Commands,
     game_clock: Res<GameClock>,
 ) {
+    if rb_events.is_empty() {
+        return;
+    }
+    /*
+       Say the client is in PreUpdate, with clock at 100.
+       There are 2 replicon packets to process which we just read from the network in this order:
+       * Updates for frame 95
+       * Updates for frame 96
+
+       Client processes first packet:  inserts values into SS for frame 95, and request rollbacks to 95+1
+       Client processes second packet: inserts values into SS for frame 96, and request rollbacks to 96+1
+
+       If we are sure we're getting entire world updates per packet – which we are with replicon
+       as of october 2023, then it's safe to rollback to the most recent frame i think.
+
+       if we get partial updates per packet - ie not all entities included per tick - then we need
+       to rollback to the oldest requested frame, or we might miss data for entities that were
+       included in the first packet (@95) but not in the second (@96).
+    */
+    // this hashmap stuff is a temporary debugging hack to detect if/when this is happening
+    // don't really want or need to allocate here..
+    let mut rb_reqs = bevy::utils::HashMap::<FrameNumber, u32>::new();
     let mut rb_frame: FrameNumber = 0;
     // NB: a manually managed event queue, which we drain here
     for ev in rb_events.drain() {
+        *(rb_reqs.entry(ev.frame()).or_default()) += 1;
         if rb_frame == 0 || ev.frame() < rb_frame {
             rb_frame = ev.frame();
         }
     }
-    if rb_frame == 0 {
-        return;
+    // multiple frame targets requested?
+    if rb_reqs.len() > 1 {
+        let max_frame = rb_reqs.keys().max().unwrap();
+        warn!("🎢 ROLLBACK REQS SPAN MANY FRAMES: {rb_reqs:?} rb_frame:{rb_frame} BUT changing to max_frame: {max_frame}");
+        // hoping this might help limit the rollback depth when client gets bogged down.
+        rb_frame = *max_frame;
     }
+
     commands.insert_resource(Rollback::new(rb_frame, game_clock.frame()));
 }

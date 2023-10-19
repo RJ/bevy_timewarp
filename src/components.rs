@@ -100,6 +100,14 @@ impl<T: TimewarpComponent> ServerSnapshot<T> {
     pub fn type_name(&self) -> &str {
         std::any::type_name::<T>()
     }
+    pub fn newest_snap_frame(&self) -> Option<FrameNumber> {
+        let nf = self.values.newest_frame();
+        if nf == 0 {
+            None
+        } else {
+            Some(nf)
+        }
+    }
 }
 
 /// used to record component birth/death ranges in ComponentHistory.
@@ -190,19 +198,13 @@ impl<T: TimewarpComponent> ComponentHistory<T> {
         if !self.alive_at_frame(frame) {
             return;
         }
-        if self.correction_logging_enabled {
-            debug!(
-                "component death @ {frame} {:?} {:?}",
-                std::any::type_name::<T>(),
-                self.alive_ranges
-            );
-        } else {
-            trace!(
-                "component death @ {frame} {:?} {:?}",
-                std::any::type_name::<T>(),
-                self.alive_ranges
-            );
-        }
+
+        trace!(
+            "component death @ {frame} {:?} {:?}",
+            std::any::type_name::<T>(),
+            self.alive_ranges
+        );
+
         assert!(
             self.alive_at_frame(frame),
             "Can't report death of component not alive"
