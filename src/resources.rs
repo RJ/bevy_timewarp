@@ -89,6 +89,13 @@ impl TimewarpConfig {
     pub fn set_consolidation_strategy(&mut self, strategy: RollbackConsolidationStrategy) {
         self.consolidation_strategy = strategy;
     }
+    pub fn is_within_rollback_window(
+        &self,
+        current_frame: FrameNumber,
+        target_frame: FrameNumber,
+    ) -> bool {
+        target_frame > current_frame - self.rollback_window
+    }
 }
 
 /// Updated whenever we perform a rollback
