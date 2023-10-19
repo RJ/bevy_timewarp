@@ -150,12 +150,15 @@ pub(crate) fn rollback_component<T: TimewarpComponent>(
                     let oldest_frame = comp_hist.values.oldest_frame();
 
                     error!(
-                        "HMMMM f @ oldest_frame ({oldest_frame}) comp_val = {:?}",
+                        "HMMMM {entity:?} f @ oldest_frame ({oldest_frame}) comp_val = {:?}",
                         comp_hist.at_frame(oldest_frame)
                     );
-                    error!("HMMMM {game_clock:?} OPT_COMP = {opt_comp:?}");
+                    error!("HMMMM {entity:?} {game_clock:?} OPT_COMP = {opt_comp:?}");
                     for f in (rollback_frame - 2)..=(rollback_frame + 2) {
-                        error!("HMMMM f={f} comp_val = {:?}", comp_hist.at_frame(f));
+                        error!(
+                            "HMMMM {entity:?} f={f} comp_val = {:?}",
+                            comp_hist.at_frame(f)
+                        );
                     }
 
                     panic!("{prefix} {game_clock:?} {entity:?} {provenance:?} {} rollback_frame: {rollback_frame} alive_ranges:{:?} rb:{rb:?} oldest value in comp_hist: {oldest_frame} occ:{:?}\n",

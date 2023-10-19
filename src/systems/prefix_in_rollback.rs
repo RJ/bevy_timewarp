@@ -40,10 +40,6 @@ pub(crate) fn rebirth_components_during_rollback<T: TimewarpComponent>(
     for (entity, comp_history) in q.iter() {
         let target_frame = game_clock.frame();
         if comp_history.alive_at_frame(target_frame) {
-            info!(
-                "CHecking if {entity:?} {} alive at {game_clock:?} - YES ",
-                comp_history.type_name()
-            );
             // we could go fishing in SS for this, but it should be here if its alive.
             // i think i'm only hitting this with rollback underflows though, during load?
             // need more investigation and to figure out a test case..
@@ -67,10 +63,6 @@ pub(crate) fn rebirth_components_during_rollback<T: TimewarpComponent>(
             );
             commands.entity(entity).insert(comp_val.clone());
         } else {
-            info!(
-                "CHecking if {entity:?} {} alive at {game_clock:?} - NO ",
-                comp_history.type_name()
-            );
             trace!(
                 "comp not alive at {game_clock:?} for {entity:?} {:?} {}",
                 comp_history.alive_ranges,

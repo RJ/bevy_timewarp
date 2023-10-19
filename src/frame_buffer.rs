@@ -69,7 +69,7 @@ where
     /// Theoretically.. value could be None if not inserted yet.
     pub fn oldest_frame(&self) -> FrameNumber {
         self.front_frame
-            .saturating_sub(self.capacity as FrameNumber + 1)
+            .saturating_sub(self.entries.len().saturating_sub(1) as FrameNumber)
     }
 
     /// removes entries for frames larger than `frame`
@@ -209,6 +209,35 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_oldest_frame() {
+        let mut fb = FrameBuffer::<u32>::with_capacity(5, "");
+        assert_eq!(fb.oldest_frame(), 0);
+        fb.insert(1, 1).unwrap();
+        assert_eq!(fb.get(1), Some(&1));
+        assert_eq!(fb.oldest_frame(), 1);
+
+        fb.insert(2, 2).unwrap();
+        assert_eq!(fb.get(2), Some(&2));
+        assert_eq!(fb.oldest_frame(), 1);
+
+        fb.insert(3, 3).unwrap();
+        assert_eq!(fb.get(3), Some(&3));
+        assert_eq!(fb.oldest_frame(), 1);
+
+        fb.insert(4, 4).unwrap();
+        assert_eq!(fb.get(4), Some(&4));
+        assert_eq!(fb.oldest_frame(), 1);
+
+        fb.insert(5, 5).unwrap();
+        assert_eq!(fb.get(5), Some(&5));
+        assert_eq!(fb.oldest_frame(), 1);
+
+        fb.insert(6, 6).unwrap();
+        assert_eq!(fb.get(6), Some(&6));
+        assert_eq!(fb.oldest_frame(), 2);
+    }
 
     #[test]
     fn test_frame_buffer() {
