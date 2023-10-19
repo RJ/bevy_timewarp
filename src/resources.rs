@@ -5,8 +5,21 @@ use bevy::{
 };
 use std::{ops::Range, time::Duration};
 
+/// if various systems request rollbacks to different frames within one tick, when consolidating
+/// those requests into an actionable Rollback, do we choose the oldest or newest frame from the
+/// list of requests?
+#[derive(Debug, Copy, Clone)]
+pub enum RollbackConsolidationStrategy {
+    Oldest,
+    Newest,
+}
+
 #[derive(Resource, Debug, Clone)]
 pub struct TimewarpConfig {
+    /// if you can update some entities one frame and some another, ie you don't receive
+    /// entire-world update, set this to Oldest, or you will miss data.
+    /// the default is Newest (for replicon, which is entire-world updates only atm)
+    pub consolidation_strategy: RollbackConsolidationStrategy,
     /// how many frames of old component values should we buffer?
     /// can't roll back any further than this. will depend on network lag and game mechanics.
     pub rollback_window: FrameNumber,
@@ -29,6 +42,7 @@ impl TimewarpConfig {
     /// schedule: FixedUpdate
     pub fn new(first_set: impl SystemSet, last_set: impl SystemSet) -> Self {
         Self {
+            consolidation_strategy: RollbackConsolidationStrategy::Newest,
             first_set: Box::new(first_set),
             last_set: Box::new(last_set),
             // and defaults, override with builder fns:
@@ -37,18 +51,23 @@ impl TimewarpConfig {
             schedule: Box::new(FixedUpdate),
         }
     }
-    pub fn set_schedule(mut self, schedule: impl ScheduleLabel) -> Self {
+    pub fn with_schedule(mut self, schedule: impl ScheduleLabel) -> Self {
         self.schedule = Box::new(schedule);
         self
     }
-    pub fn set_forced_rollback(mut self, enabled: bool) -> Self {
+    pub fn with_forced_rollback(mut self, enabled: bool) -> Self {
         self.force_rollback_always = enabled;
         self
     }
-    pub fn set_rollback_window(mut self, num_frames: FrameNumber) -> Self {
+    pub fn with_rollback_window(mut self, num_frames: FrameNumber) -> Self {
         self.rollback_window = num_frames;
         self
     }
+    pub fn with_consolidation_strategy(mut self, strategy: RollbackConsolidationStrategy) -> Self {
+        self.consolidation_strategy = strategy;
+        self
+    }
+
     pub fn first_set(&self) -> BoxedSystemSet {
         self.first_set.as_ref().dyn_clone()
     }
@@ -63,6 +82,12 @@ impl TimewarpConfig {
     }
     pub fn rollback_window(&self) -> FrameNumber {
         self.rollback_window
+    }
+    pub fn consolidation_strategy(&self) -> RollbackConsolidationStrategy {
+        self.consolidation_strategy
+    }
+    pub fn set_consolidation_strategy(&mut self, strategy: RollbackConsolidationStrategy) {
+        self.consolidation_strategy = strategy;
     }
 }
 

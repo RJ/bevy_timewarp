@@ -164,6 +164,7 @@ impl<T: TimewarpComponent> ComponentHistory<T> {
     }
 
     /// removes values buffered for this frame, and greater frames.
+    #[allow(dead_code)]
     pub fn remove_frame_and_beyond(&mut self, frame: FrameNumber) {
         self.values
             .remove_entries_newer_than(frame.saturating_sub(1));

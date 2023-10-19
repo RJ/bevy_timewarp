@@ -147,15 +147,18 @@ fn despawn_revival_during_rollback() {
     // TODO perhaps we want to move the despawn systems to a timewarp header set before game logic?
     //      this would make the behaviour seem more sane? hmm.
 
-    // when we get a "despawn @ 4" from the server, it means: it existed and was removed during 4
-    // make sure it's gone by 5?
+    // when we get a "despawn @ 4" from the server, it means:
+    //
+    // The Despawn happened during frame 4, and was detected in PostUpdate.
+    // so the entity should always exist at the start of frame 4,
+    // but should not exist at the start of frame 5.
 
     let despawn_frame = 4;
     app.world
         .entity_mut(e1)
         .insert(DespawnMarker::for_frame(despawn_frame));
 
-    tick(&mut app); // frame 4
+    tick(&mut app); // frame 4 - "sometime during frame 4, we despawned e1"
 
     assert!(
         app.world.get_entity(e1).is_some(),
@@ -194,8 +197,12 @@ fn despawn_revival_during_rollback() {
     assert_eq!(app.comp_val_at::<Enemy>(e1, 2).unwrap().health, 100);
     assert_eq!(app.comp_val_at::<Enemy>(e1, 3).unwrap().health, 99); // x
     assert!(
-        app.comp_val_at::<Enemy>(e1, despawn_frame).is_none(),
-        "should have been despawned"
+        app.comp_val_at::<Enemy>(e1, despawn_frame).is_some(),
+        "should exist at the start of the frame it's despawned on"
+    );
+    assert!(
+        app.comp_val_at::<Enemy>(e1, despawn_frame + 1).is_none(),
+        "should have been despawned at despawn_frame + 1"
     );
 
     assert!(

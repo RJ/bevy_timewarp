@@ -36,9 +36,12 @@ pub(crate) fn rebirth_components_during_rollback<T: TimewarpComponent>(
     for (entity, comp_history, opt_originframe) in q.iter() {
         let target_frame = game_clock.frame().max(opt_originframe.map_or(0, |of| of.0));
         if comp_history.alive_at_frame(target_frame) {
+            // we could go fishing in SS for this, but it should be here if its alive.
+            // i think i'm only hitting this with rollback underflows though, during load?
+            // need more investigation and to figure out a test case..
             let comp_val = comp_history.at_frame(target_frame).unwrap_or_else(|| {
                 error!(
-                    // hitting this, spamming bullets.. gaps in CH values, can't rb to a gap?
+                    // gaps in CH values, can't rb to a gap?
                     "{entity:?} no comp history for {:?} for {:?} focc:{:?} {game_clock:?} {rb:?}",
                     target_frame,
                     std::any::type_name::<T>(),

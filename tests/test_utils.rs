@@ -23,8 +23,8 @@ pub struct EntName {
 
 pub fn setup_test_app() -> App {
     let tw_config = TimewarpConfig::new(TimewarpTestSets::GameLogic, TimewarpTestSets::GameLogic)
-        .set_rollback_window(TEST_ROLLBACK_WINDOW)
-        .set_schedule(FixedUpdate);
+        .with_rollback_window(TEST_ROLLBACK_WINDOW)
+        .with_schedule(FixedUpdate);
     let mut app = App::new();
     app.add_plugins(bevy::log::LogPlugin {
         level: bevy::log::Level::TRACE,
@@ -44,7 +44,8 @@ pub fn tick(app: &mut App) {
     let period = fxt.period;
     fxt.tick(period);
     app.update();
-    info!("----------------------------------------------------------");
+    let f = app.world.resource::<GameClock>().frame();
+    info!("end of update for {f} ----------------------------------------------------------");
 }
 
 // some syntactic sugar, just to make tests less of an eyesore:

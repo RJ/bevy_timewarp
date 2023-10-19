@@ -42,7 +42,6 @@ pub(crate) fn rekill_components_during_rollback<T: TimewarpComponent>(
                 std::any::type_name::<T>(),
                 target_frame
             );
-            comp_history.remove_frame_and_beyond(target_frame);
             commands.entity(entity).remove::<T>();
         }
     }

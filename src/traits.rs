@@ -153,7 +153,9 @@ pub enum InsertComponentResult {
     ComponentsAdded,
 }
 
-pub trait EntityMutICAF {
+/// This exists to make my replicon custom deserializing functions nicer.
+/// in theory you can do this with checks for SS or InsertComponentAtFrame everywhere.
+pub trait TimewarpEntityMutTraits {
     /// For inserting a component into a specific frame.
     /// Timewarp systems will insert into the entity at the correct point.
     fn insert_component_at_frame<T: TimewarpComponent>(
@@ -163,7 +165,7 @@ pub trait EntityMutICAF {
     ) -> Result<InsertComponentResult, TimewarpError>;
 }
 
-impl EntityMutICAF for EntityMut<'_> {
+impl TimewarpEntityMutTraits for EntityMut<'_> {
     fn insert_component_at_frame<T: TimewarpComponent>(
         &mut self,
         frame: FrameNumber,
