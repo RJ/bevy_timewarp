@@ -90,7 +90,7 @@ fn error_correction() {
     // diff_at_frame flag for the current frame, so a TimewarpCorrection is generated.
 
     let mut ss_e1 = app.world.get_mut::<ServerSnapshot<Enemy>>(e1).unwrap();
-    ss_e1.insert(2, Enemy { health: 100 });
+    ss_e1.insert(2, Enemy { health: 100 }).unwrap();
 
     // this message will be processed in the next tick - frame 5.
     // prior to this there shouldn't be a TimewarpCorrection component,
@@ -177,7 +177,7 @@ fn error_correction() {
 
     // supply frame 7 value at known local value, ie server confirms our simulation value
     let mut ss_e1 = app.world.get_mut::<ServerSnapshot<Enemy>>(e1).unwrap();
-    ss_e1.insert(7, Enemy { health: 95 });
+    ss_e1.insert(7, Enemy { health: 95 }).unwrap();
 
     tick(&mut app); // frame 10 - rollback? no. should be bypassed because prediction was right
 

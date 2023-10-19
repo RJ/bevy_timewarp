@@ -149,7 +149,7 @@ fn component_add_and_remove() {
     let new_shield = Shield;
 
     let mut ss_e1 = app.world.get_mut::<ServerSnapshot<Shield>>(e1).unwrap();
-    ss_e1.insert(8, new_shield);
+    ss_e1.insert(8, new_shield).unwrap();
 
     // PANICs on purpose atm, don't support ICAF if SS present.
     // app.world

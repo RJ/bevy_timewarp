@@ -213,33 +213,33 @@ mod tests {
     #[test]
     fn test_frame_buffer() {
         let mut fb = FrameBuffer::<u32>::with_capacity(5, "");
-        fb.insert(1, 1);
+        fb.insert(1, 1).unwrap();
         assert_eq!(fb.get(1), Some(&1));
 
-        fb.insert(2, 2);
+        fb.insert(2, 2).unwrap();
         // print!("{fb:?}");
-        fb.insert(3, 3);
-        fb.insert(4, 4);
-        fb.insert(5, 5);
+        fb.insert(3, 3).unwrap();
+        fb.insert(4, 4).unwrap();
+        fb.insert(5, 5).unwrap();
         assert_eq!(fb.get(1), Some(&1));
         assert_eq!(fb.get(3), Some(&3));
         assert_eq!(fb.get(5), Some(&5));
         assert_eq!(fb.get(6), None);
-        fb.insert(6, 6);
+        fb.insert(6, 6).unwrap();
         assert_eq!(fb.get(6), Some(&6));
         // 1 should be dropped now
         assert_eq!(fb.get(1), None);
         // now test modifying a val by inserting over
         assert_eq!(fb.get(3), Some(&3));
-        fb.insert(3, 33);
+        fb.insert(3, 33).unwrap();
         assert_eq!(fb.get(3), Some(&33));
         // test modifying by get_mut
         let v2 = fb.get_mut(2).unwrap();
         *v2 = 22;
-        fb.insert(2, 22);
+        fb.insert(2, 22).unwrap();
         assert_eq!(fb.newest_frame(), 6);
         // inserting with a gap should fill with nones
-        fb.insert(8, 8);
+        fb.insert(8, 8).unwrap();
         assert_eq!(fb.get(7), None);
         assert_eq!(fb.get(8), Some(&8));
         assert_eq!(fb.newest_frame(), 8);

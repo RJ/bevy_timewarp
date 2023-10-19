@@ -26,7 +26,9 @@ pub(crate) fn sanity_check(
         );
     }
     if let Some(rb) = opt_rb {
-        if *prev_frame == **game_clock && rb.range.start == *prev_frame {
+        if *prev_frame == **game_clock
+            && (rb.range.start == *prev_frame && rb.range.end != *prev_frame)
+        {
             panic!(
             "⛔️ GameClock not advancing properly, and timewarp wants to rollback. {game_clock:?} rb:{rb:?}"
             );

@@ -25,12 +25,12 @@ pub(crate) fn clear_removed_components_queue<T: Component>(
 
 // during rollback, need to re-remove components that were inserted, based on stored lifetimes.
 pub(crate) fn rekill_components_during_rollback<T: TimewarpComponent>(
-    mut q: Query<(Entity, &mut ComponentHistory<T>), With<T>>,
+    mut q: Query<(Entity, &ComponentHistory<T>), With<T>>,
     game_clock: Res<GameClock>,
     mut commands: Commands,
 ) {
     let target_frame = game_clock.frame();
-    for (entity, mut comp_history) in q.iter_mut() {
+    for (entity, comp_history) in q.iter_mut() {
         trace!(
             "rekill check? {entity:?} CH {} alive_range: {:?}",
             comp_history.type_name(),

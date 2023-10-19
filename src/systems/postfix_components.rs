@@ -7,6 +7,7 @@ use bevy::prelude::*;
 */
 
 // debugging..
+#[allow(dead_code)]
 fn debug_type<T: TimewarpComponent>() -> bool {
     std::any::type_name::<T>().contains("::Position")
 }

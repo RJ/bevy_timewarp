@@ -351,10 +351,10 @@ impl Plugin for TimewarpPlugin {
             //
             // End debug headers
             //
-            // .add_systems(
-            //     self.config.schedule(),
-            //     systems::sanity_check.in_set(TimewarpPrefixSet::First),
-            // )
+            .add_systems(
+                self.config.schedule(),
+                systems::sanity_check.in_set(TimewarpPrefixSet::First),
+            )
             .add_systems(
                 self.config.schedule(),
                 (

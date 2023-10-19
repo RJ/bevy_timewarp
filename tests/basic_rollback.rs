@@ -134,6 +134,7 @@ fn basic_rollback() {
     ss_e2.insert(2, Enemy { health: 100 }).unwrap();
 
     // this message will be processed in the next tick - frame 5.
+
     let gc = app.world.get_resource::<GameClock>().unwrap();
     assert_eq!(gc.frame(), 4);
 
