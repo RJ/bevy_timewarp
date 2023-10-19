@@ -89,17 +89,14 @@ impl TimewarpTraits for App {
         );
         self.add_systems(
             schedule.clone(), // TODO RJRJ MOVE FILE
-            prefix_during_rollback::record_component_death::<T>
+            prefix_first::record_component_death::<T>
                 .run_if(not(resource_exists::<Rollback>()))
-                .in_set(TimewarpPrefixSet::First), // RJRJRJ X
+                .in_set(TimewarpPrefixSet::First),
         );
         self.add_systems(
             schedule.clone(),
-            (
-                // prefix_during_rollback::record_component_death::<T>,
-                prefix_during_rollback::rebirth_components_during_rollback::<T>,
-            )
-                .in_set(TimewarpPrefixSet::DuringRollback),
+            (prefix_in_rollback::rebirth_components_during_rollback::<T>,)
+                .in_set(TimewarpPrefixSet::InRollback),
         );
         // this may result in a Rollback resource being inserted.
         self.add_systems(
@@ -194,7 +191,7 @@ impl TimewarpEntityMutTraits for EntityMut<'_> {
             ss.insert(frame, component.clone())
                 .expect("fresh one can't fail");
             // (tw system sets correction logging for us later, if needed)
-            info!(
+            debug!(
                 "Adding SS/CH to {:?} for {}\nInitial val @ {:?} = {:?}",
                 self.id(),
                 std::any::type_name::<T>(),

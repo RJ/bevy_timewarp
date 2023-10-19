@@ -96,6 +96,8 @@ pub(crate) fn rollback_component<T: TimewarpComponent>(
             **game_clock
         };
 
+        let end_frame = rb.range.end;
+
         let prefix = if rollback_frame != **game_clock {
             warn!(
                 "😬 rollback_component {entity:?} {game_clock:?} rollback_frame:{rollback_frame} {}",
@@ -105,9 +107,10 @@ pub(crate) fn rollback_component<T: TimewarpComponent>(
         } else {
             ""
         };
+        trace!("rollback_component {entity:?} {} rollback-frame:{rollback_frame} {game_clock:?} end_frame={end_frame} {rb:?}", comp_hist.type_name());
         let provenance = match (
             comp_hist.alive_at_frame(rollback_frame),
-            comp_hist.alive_at_frame(**game_clock),
+            comp_hist.alive_at_frame(end_frame),
         ) {
             (true, true) => Provenance::AliveThenAlive,
             (true, false) => Provenance::AliveThenDead,

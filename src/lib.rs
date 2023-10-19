@@ -209,10 +209,7 @@ use prelude::*;
 pub enum TimewarpPrefixSet {
     First,
 
-    CheckIfRollbackComplete,
-
-    /// Runs during rollback
-    DuringRollback,
+    InRollback,
 
     /// Doesn't run in rollback
     ///
@@ -277,15 +274,12 @@ impl Plugin for TimewarpPlugin {
                 self.config.schedule(),
                 (
                     TimewarpPrefixSet::First,
-                    TimewarpPrefixSet::CheckIfRollbackComplete
-                        .run_if(resource_exists::<Rollback>()),
+                    TimewarpPrefixSet::InRollback.run_if(resource_exists::<Rollback>()),
                     // -- apply_deferred -- //
                     TimewarpPrefixSet::CheckIfRollbackNeeded
                         .run_if(not(resource_exists::<Rollback>())),
                     // -- apply_deferred -- //
                     TimewarpPrefixSet::StartRollback.run_if(resource_added::<Rollback>()),
-                    // -- apply_deferred -- //
-                    TimewarpPrefixSet::DuringRollback.run_if(resource_exists::<Rollback>()),
                     TimewarpPrefixSet::UnwrapBlueprints,
                     TimewarpPrefixSet::Last,
                     // -- apply_deferred -- //
@@ -298,7 +292,7 @@ impl Plugin for TimewarpPlugin {
             .add_systems(
                 self.config.schedule(),
                 apply_deferred
-                    .after(TimewarpPrefixSet::CheckIfRollbackComplete)
+                    .after(TimewarpPrefixSet::InRollback)
                     .before(TimewarpPrefixSet::CheckIfRollbackNeeded),
             )
             .add_systems(
@@ -306,12 +300,6 @@ impl Plugin for TimewarpPlugin {
                 apply_deferred
                     .after(TimewarpPrefixSet::CheckIfRollbackNeeded)
                     .before(TimewarpPrefixSet::StartRollback),
-            )
-            .add_systems(
-                self.config.schedule(),
-                apply_deferred
-                    .after(TimewarpPrefixSet::StartRollback)
-                    .before(TimewarpPrefixSet::DuringRollback),
             )
             //
             // END APPLY DEFERREDS
@@ -323,7 +311,10 @@ impl Plugin for TimewarpPlugin {
             .add_systems(
                 self.config.schedule(),
                 (|game_clock: Res<GameClock>, rb: Option<Res<Rollback>>| {
-                    trace!("Prefix::First for {} {rb:?}", **game_clock + 1)
+                    trace!(
+                        "--------------------- Prefix::First for {} {rb:?}",
+                        **game_clock + 1
+                    )
                 })
                 .in_set(TimewarpPrefixSet::First),
             )
@@ -358,11 +349,11 @@ impl Plugin for TimewarpPlugin {
             .add_systems(
                 self.config.schedule(),
                 (
-                    systems::prefix_check_for_rollback_completion::check_for_rollback_completion,
+                    systems::prefix_in_rollback::check_for_rollback_completion,
                     apply_deferred,
                 )
                     .chain()
-                    .in_set(TimewarpPrefixSet::CheckIfRollbackComplete),
+                    .in_set(TimewarpPrefixSet::InRollback),
             )
             .add_systems(
                 self.config.schedule(),

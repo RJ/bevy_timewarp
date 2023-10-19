@@ -179,9 +179,9 @@ impl<T: TimewarpComponent> ComponentHistory<T> {
         false
     }
     pub fn report_birth_at_frame(&mut self, frame: FrameNumber) {
-        debug!("component birth @ {frame} {:?}", std::any::type_name::<T>());
+        trace!("component birth @ {frame} {:?}", std::any::type_name::<T>());
         if self.alive_at_frame(frame) {
-            warn!("Can't report birth of component already alive");
+            trace!("Can't report birth of component already alive");
             return;
         }
         assert!(

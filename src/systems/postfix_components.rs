@@ -155,7 +155,7 @@ pub(crate) fn record_component_birth<T: TimewarpComponent>(
     }
 
     for (entity, mut ch) in q.iter_mut() {
-        debug!(
+        trace!(
             "{entity:?} Component birth @ {:?} {:?}",
             game_clock.frame(),
             std::any::type_name::<T>()

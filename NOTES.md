@@ -130,7 +130,7 @@ New custom events are written to the bevy event queue, to be consumed by my game
 <td>sanity check systems prevent blowing your own foot off, kinda.</td>
 </tr>
 <tr>
-<td>CheckIfRollbackComplete</td>
+<td>InRollback</td>
 <td>in rb</td>
 <td>During rollback, we check if we should exit rollback, having resimulated everything in the requested rollback range.</td>
 </tr>
@@ -146,11 +146,6 @@ New custom events are written to the bevy event queue, to be consumed by my game
 If previous set requested a rollback, we wind back the game clock, and load in component data for
 the appropriate frame for starting rollback.
 </td>
-</tr>
-<tr>
-<td>DuringRollback</td>
-<td>in rb</td>
-<td>record component removals, revive dead components that should be alive this frame, etc.</td>
 </tr>
 <tr>
 <td>UnwrapBlueprints</td>

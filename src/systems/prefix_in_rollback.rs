@@ -8,34 +8,42 @@ use bevy::prelude::*;
 
 */
 
-/// when components are removed, we log the death frame
-pub(crate) fn record_component_death<T: TimewarpComponent>(
-    mut removed: RemovedComponents<T>,
-    mut q: Query<&mut ComponentHistory<T>>,
+/// If we reached the end of the Rollback range, restore the frame period and cleanup.
+/// this will remove the [`Rollback`] resource.
+pub(crate) fn check_for_rollback_completion(
     game_clock: Res<GameClock>,
+    rb: Res<Rollback>,
+    mut commands: Commands,
+    mut fx: ResMut<FixedTime>,
 ) {
-    for entity in &mut removed {
-        if let Ok(mut ct) = q.get_mut(entity) {
-            debug!(
-                "{entity:?} Component death @ {:?} {:?}",
-                game_clock.frame(),
-                std::any::type_name::<T>()
-            );
-            ct.report_death_at_frame(game_clock.frame());
-        }
+    if rb.range.end != **game_clock {
+        return;
     }
+    // we keep track of the previous rollback mainly for integration tests
+    commands.insert_resource(PreviousRollback(rb.as_ref().clone()));
+    info!(
+        "🛼🛼 Rollback complete. {:?}, frames: {} gc:{game_clock:?}",
+        rb,
+        rb.range.end - rb.range.start
+    );
+    fx.period = rb.original_period.unwrap();
+    commands.remove_resource::<Rollback>();
 }
 
 /// during rollback, need to re-insert components that were removed, based on stored lifetimes.
 pub(crate) fn rebirth_components_during_rollback<T: TimewarpComponent>(
-    q: Query<(Entity, &ComponentHistory<T>, Option<&OriginFrame>), Without<T>>,
+    q: Query<(Entity, &ComponentHistory<T>), Without<T>>,
     game_clock: Res<GameClock>,
     mut commands: Commands,
     rb: Res<Rollback>,
 ) {
-    for (entity, comp_history, opt_originframe) in q.iter() {
-        let target_frame = game_clock.frame().max(opt_originframe.map_or(0, |of| of.0));
+    for (entity, comp_history) in q.iter() {
+        let target_frame = game_clock.frame();
         if comp_history.alive_at_frame(target_frame) {
+            info!(
+                "CHecking if {entity:?} {} alive at {game_clock:?} - YES ",
+                comp_history.type_name()
+            );
             // we could go fishing in SS for this, but it should be here if its alive.
             // i think i'm only hitting this with rollback underflows though, during load?
             // need more investigation and to figure out a test case..
@@ -59,6 +67,10 @@ pub(crate) fn rebirth_components_during_rollback<T: TimewarpComponent>(
             );
             commands.entity(entity).insert(comp_val.clone());
         } else {
+            info!(
+                "CHecking if {entity:?} {} alive at {game_clock:?} - NO ",
+                comp_history.type_name()
+            );
             trace!(
                 "comp not alive at {game_clock:?} for {entity:?} {:?} {}",
                 comp_history.alive_ranges,
