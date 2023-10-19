@@ -17,10 +17,10 @@ pub fn deserialize_rotation_timewarp(
     let sin: f32 = bincode::deserialize_from(&mut cursor)?;
     let cos: f32 = bincode::deserialize_from(&mut cursor)?;
     let comp = Rotation::from_sin_cos(sin, cos);
-    if let Some(mut ss) = entity.get_mut::<ServerSnapshot<Rotation>>() {
-        ss.insert(tick.get(), comp);
-    } else {
-        entity.insert(comp);
+    // added to EntityMut by timewarp trait:
+    match entity.insert_component_at_frame(tick.get(), &comp) {
+        Ok(_) => {}
+        Err(err) => warn!("{err:?}"),
     }
     Ok(())
 }
