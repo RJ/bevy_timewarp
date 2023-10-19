@@ -131,11 +131,17 @@ fn basic_rollback() {
     // our app's netcode would insert the authoritative (slightly outdated) values into ServerSnapshots:
 
     let mut ss_e2 = app.world.get_mut::<ServerSnapshot<Enemy>>(e2).unwrap();
-    ss_e2.insert(2, Enemy { health: 100 });
+    ss_e2.insert(2, Enemy { health: 100 }).unwrap();
 
     // this message will be processed in the next tick - frame 5.
 
+    let gc = app.world.get_resource::<GameClock>().unwrap();
+    assert_eq!(gc.frame(), 4);
+
     tick(&mut app); // frame 5
+
+    let gc = app.world.get_resource::<GameClock>().unwrap();
+    assert_eq!(gc.frame(), 5);
 
     // frame 5 should run normally, then rollback systems will run, effect a rollback,
     // and resimulate from f2
@@ -202,7 +208,7 @@ fn basic_rollback() {
     let mut ss_e2 = app.world.get_mut::<ServerSnapshot<Enemy>>(e2).unwrap();
     // we know from the asserts above that health of e2 was 97 at frame 5.
     // so lets make the server confirm that:
-    ss_e2.insert(5, Enemy { health: 97 });
+    ss_e2.insert(5, Enemy { health: 97 }).unwrap();
 
     tick(&mut app); // frame 8, potential rollback
 

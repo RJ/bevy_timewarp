@@ -22,14 +22,18 @@ pub struct EntName {
 }
 
 pub fn setup_test_app() -> App {
-    let tw_config = TimewarpConfig::new(TimewarpTestSets::GameLogic)
-        .set_rollback_window(TEST_ROLLBACK_WINDOW)
-        .set_schedule(FixedUpdate);
+    let tw_config = TimewarpConfig::new(TimewarpTestSets::GameLogic, TimewarpTestSets::GameLogic)
+        .with_rollback_window(TEST_ROLLBACK_WINDOW)
+        .with_schedule(FixedUpdate);
     let mut app = App::new();
-    app.add_plugins(bevy::log::LogPlugin::default());
-    app.add_plugins(TimewarpPlugin::new(tw_config.clone()));
+    app.add_plugins(bevy::log::LogPlugin {
+        level: bevy::log::Level::TRACE,
+        filter: "bevy_timewarp=trace".to_string(),
+    });
+    app.add_plugins(TimewarpPlugin::new(tw_config));
     app.add_plugins(bevy::time::TimePlugin::default());
     app.insert_resource(FixedTime::new(TIMESTEP));
+    warn!("⏱️Instant::now= {:?}", bevy::utils::Instant::now());
     app
 }
 
@@ -38,10 +42,10 @@ pub fn setup_test_app() -> App {
 pub fn tick(app: &mut App) {
     let mut fxt = app.world.resource_mut::<FixedTime>();
     let period = fxt.period;
-    info!("<tick>");
     fxt.tick(period);
     app.update();
-    info!("</tick>");
+    let f = app.world.resource::<GameClock>().frame();
+    info!("end of update for {f} ----------------------------------------------------------");
 }
 
 // some syntactic sugar, just to make tests less of an eyesore:

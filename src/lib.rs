@@ -198,30 +198,58 @@ pub mod prelude {
     pub use crate::traits::*;
     pub use crate::TimewarpPlugin;
     pub type FrameNumber = u32;
-    pub use crate::systems::RollbackRequest;
-    pub use crate::TimewarpSet;
+    pub use crate::TimewarpPostfixSet;
+    pub use crate::TimewarpPrefixSet;
 }
 
 use bevy::prelude::*;
 use prelude::*;
 
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum TimewarpPrefixSet {
+    First,
+
+    CheckIfRollbackComplete,
+
+    /// Runs during rollback
+    DuringRollback,
+
+    /// Doesn't run in rollback
+    ///
+    /// Contains:
+    /// * detect_misuse_of_icaf<T>
+    /// * trigger_rollback_when_snapshot_added<T>
+    /// * trigger_rollback_when_icaf_added<T>
+    /// then:
+    /// * consolidate_rollback_requests
+    /// then:
+    /// * apply_deferred (so the Rollback res might exist, Ch/SS added.)
+    CheckIfRollbackNeeded,
+
+    /// Runs only if the Rollback resource was just Added<>
+    ///
+    /// * rollback_initiated
+    /// then:
+    /// * rollback_component<T>
+    /// * rollback_component<T>
+    /// ...
+    StartRollback,
+
+    /// Runs always, unpacks non-timewarp components at this frame.
+    /// Current used for blueprints.
+    UnwrapBlueprints,
+
+    Last,
+}
+
 /// bevy_timewarp's systems run in these three sets, which get configured to run
 /// after the main game logic (the set for which is provided in the plugin setup)
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum TimewarpSet {
-    RecordComponentValues,
-    RollbackUnderwayComponents,
-    RollbackUnderwayGlobal,
-    RollbackInitiated,
-    NoRollback,
-}
-
-#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum TimewarpSetMarkers {
-    /// remains empty - exists as marker for interleaving apply_deferreds
-    RollbackStartMarker,
-    /// remains empty - exists as marker for interleaving apply_deferreds
-    RollbackEndMarker,
+pub enum TimewarpPostfixSet {
+    First,
+    Components,
+    DuringRollback,
+    Last,
 }
 
 pub struct TimewarpPlugin {
@@ -242,82 +270,158 @@ impl Plugin for TimewarpPlugin {
             // RollbackRequest events are drained manually in `consolidate_rollback_requests`
             .init_resource::<Events<RollbackRequest>>()
             .insert_resource(RollbackStats::default())
+            //
+            // PREFIX
+            //
             .configure_sets(
                 self.config.schedule(),
                 (
-                    TimewarpSetMarkers::RollbackStartMarker,
-                    // --- APPLY_DEFERRED ---
-                    // Runs in normal frames       : Yes
-                    // Runs when rollback initiated: Yes
-                    // Runs during ongoing rollback: Yes
-                    TimewarpSet::RecordComponentValues,
-                    // --- APPLY_DEFERRED ---
-                    // Runs in normal frames       : No
-                    // Runs when rollback initiated: Yes
-                    // Runs during ongoing rollback: Yes
-                    TimewarpSet::RollbackUnderwayComponents.run_if(resource_exists::<Rollback>()),
-                    // Runs in normal frames       : No
-                    // Runs when rollback initiated: Yes
-                    // Runs during ongoing rollback: Yes
-                    TimewarpSet::RollbackUnderwayGlobal.run_if(resource_exists::<Rollback>()),
-                    // Runs in normal frames       : Yes
-                    // Runs when rollback initiated: No
-                    // Runs during ongoing rollback: No
-                    // systems in here can potentially initiate a rollback:
-                    TimewarpSet::NoRollback.run_if(not(resource_exists::<Rollback>())),
-                    // --- APPLY_DEFERRED ---
-                    // Runs in normal frames       : No
-                    // Runs when rollback initiated: Yes
-                    // Runs during ongoing rollback: No
-                    TimewarpSet::RollbackInitiated.run_if(resource_added::<Rollback>()),
-                    TimewarpSetMarkers::RollbackEndMarker,
+                    TimewarpPrefixSet::First,
+                    TimewarpPrefixSet::CheckIfRollbackComplete
+                        .run_if(resource_exists::<Rollback>()),
+                    // -- apply_deferred -- //
+                    TimewarpPrefixSet::CheckIfRollbackNeeded
+                        .run_if(not(resource_exists::<Rollback>())),
+                    // -- apply_deferred -- //
+                    TimewarpPrefixSet::StartRollback.run_if(resource_added::<Rollback>()),
+                    // -- apply_deferred -- //
+                    TimewarpPrefixSet::DuringRollback.run_if(resource_exists::<Rollback>()),
+                    TimewarpPrefixSet::UnwrapBlueprints,
+                    TimewarpPrefixSet::Last,
+                    // -- apply_deferred -- //
                 )
                     .chain(),
+            )
+            //
+            // APPLY DEFERREDS
+            //
+            .add_systems(
+                self.config.schedule(),
+                apply_deferred
+                    .after(TimewarpPrefixSet::CheckIfRollbackComplete)
+                    .before(TimewarpPrefixSet::CheckIfRollbackNeeded),
+            )
+            .add_systems(
+                self.config.schedule(),
+                apply_deferred
+                    .after(TimewarpPrefixSet::CheckIfRollbackNeeded)
+                    .before(TimewarpPrefixSet::StartRollback),
+            )
+            .add_systems(
+                self.config.schedule(),
+                apply_deferred
+                    .after(TimewarpPrefixSet::StartRollback)
+                    .before(TimewarpPrefixSet::DuringRollback),
+            )
+            //
+            // END APPLY DEFERREDS
+            //
+            // --
+            //
+            // Debug headers
+            //
+            .add_systems(
+                self.config.schedule(),
+                (|game_clock: Res<GameClock>, rb: Option<Res<Rollback>>| {
+                    trace!("Prefix::First for {} {rb:?}", **game_clock + 1)
+                })
+                .in_set(TimewarpPrefixSet::First),
+            )
+            .add_systems(
+                self.config.schedule(),
+                (|game_clock: Res<GameClock>, rb: Option<Res<Rollback>>| {
+                    trace!("Prefix::Last for {} {rb:?}", **game_clock + 1)
+                })
+                .in_set(TimewarpPrefixSet::Last),
+            )
+            .add_systems(
+                self.config.schedule(),
+                (|game_clock: Res<GameClock>, rb: Option<Res<Rollback>>| {
+                    trace!("Postfix::First {game_clock:?} {rb:?}");
+                })
+                .in_set(TimewarpPostfixSet::First),
+            )
+            .add_systems(
+                self.config.schedule(),
+                (|game_clock: Res<GameClock>, rb: Option<Res<Rollback>>| {
+                    trace!("Postfix::Last {game_clock:?} {rb:?}");
+                })
+                .in_set(TimewarpPostfixSet::Last),
+            )
+            //
+            // End debug headers
+            //
+            .add_systems(
+                self.config.schedule(),
+                systems::sanity_check.in_set(TimewarpPrefixSet::First),
+            )
+            .add_systems(
+                self.config.schedule(),
+                (
+                    systems::prefix_check_for_rollback_completion::check_for_rollback_completion,
+                    apply_deferred,
+                )
+                    .chain()
+                    .in_set(TimewarpPrefixSet::CheckIfRollbackComplete),
+            )
+            .add_systems(
+                self.config.schedule(),
+                (
+                    systems::prefix_check_if_rollback_needed::consolidate_rollback_requests,
+                    apply_deferred,
+                )
+                    .chain()
+                    .in_set(TimewarpPrefixSet::CheckIfRollbackNeeded),
+            )
+            .add_systems(
+                self.config.schedule(),
+                systems::prefix_start_rollback::rollback_initiated
+                    .in_set(TimewarpPrefixSet::StartRollback),
+            )
+            .add_systems(
+                self.config.schedule(),
+                apply_deferred.in_set(TimewarpPrefixSet::Last),
+            )
+            //
+            // POSTFIX
+            //
+            .configure_sets(
+                self.config.schedule(),
+                (
+                    TimewarpPostfixSet::First,
+                    TimewarpPostfixSet::Components,
+                    TimewarpPostfixSet::DuringRollback.run_if(resource_exists::<Rollback>()),
+                    TimewarpPostfixSet::Last,
+                )
+                    .chain(),
+            )
+            .add_systems(
+                self.config.schedule(),
+                systems::postfix_last::despawn_entities_with_elapsed_despawn_marker
+                    .in_set(TimewarpPostfixSet::Last),
+            )
+            // flush commands at the very end, since they may be referencing entities which
+            // get despawned in PreUpdate next tick
+            .add_systems(
+                self.config.schedule(),
+                apply_deferred.after(TimewarpPostfixSet::Last),
             )
             // BoxedSystemSet implements IntoSystemSetConfig, but not IntoSystemSetConfigs
             // so for now, have to use the deprecated configure_set instead of configure_sets.
             // assume this is because bevy's API is in transitional phase in this regards..
             // https://github.com/bevyengine/bevy/pull/9247
+            // the specified first set must be after our TW prefix runs
             .configure_set(
                 self.config.schedule(),
-                self.config
-                    .after_set()
-                    .before(TimewarpSetMarkers::RollbackStartMarker),
+                self.config.first_set().after(TimewarpPrefixSet::Last),
             )
+            // the specified last set must be before the TW postfix runs.
+            .configure_set(
+                self.config.schedule(),
+                self.config.last_set().before(TimewarpPostfixSet::First),
+            )
+            //
             .insert_resource(FixedTime::new_from_secs(1.0 / 60.0))
-            .insert_resource(GameClock::new())
-            // apply_deferred between rollback sets
-            // needed because rollback logic can insert/remove components and the Rollback resource.
-            .add_systems(
-                self.config.schedule(),
-                (
-                    apply_deferred
-                        .after(TimewarpSetMarkers::RollbackStartMarker)
-                        .before(TimewarpSet::RecordComponentValues),
-                    apply_deferred
-                        .after(TimewarpSet::RecordComponentValues)
-                        .before(TimewarpSet::RollbackInitiated),
-                    apply_deferred
-                        .after(TimewarpSet::NoRollback)
-                        .before(TimewarpSet::RollbackInitiated),
-                ),
-            )
-            .add_systems(
-                self.config.schedule(),
-                systems::check_for_rollback_completion.in_set(TimewarpSet::RollbackUnderwayGlobal),
-            )
-            .add_systems(
-                self.config.schedule(),
-                systems::rollback_initiated.in_set(TimewarpSet::RollbackInitiated),
-            )
-            .add_systems(
-                self.config.schedule(),
-                (
-                    systems::consolidate_rollback_requests,
-                    systems::despawn_entities_with_elapsed_despawn_marker,
-                )
-                    .chain()
-                    .in_set(TimewarpSet::NoRollback),
-            );
+            .insert_resource(GameClock::new());
     }
 }

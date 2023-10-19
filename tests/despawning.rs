@@ -146,12 +146,19 @@ fn despawn_revival_during_rollback() {
     // timewarp systems run after game logic, and remove components, which will be done by f5.
     // TODO perhaps we want to move the despawn systems to a timewarp header set before game logic?
     //      this would make the behaviour seem more sane? hmm.
+
+    // when we get a "despawn @ 4" from the server, it means:
+    //
+    // The Despawn happened during frame 4, and was detected in PostUpdate.
+    // so the entity should always exist at the start of frame 4,
+    // but should not exist at the start of frame 5.
+
     let despawn_frame = 4;
     app.world
         .entity_mut(e1)
         .insert(DespawnMarker::for_frame(despawn_frame));
 
-    tick(&mut app); // frame 4
+    tick(&mut app); // frame 4 - "sometime during frame 4, we despawned e1"
 
     assert!(
         app.world.get_entity(e1).is_some(),
@@ -164,7 +171,7 @@ fn despawn_revival_during_rollback() {
 
     // generate a rollback that should revive the component temporarily
     let mut ss_e2 = app.world.get_mut::<ServerSnapshot<Enemy>>(e1).unwrap();
-    ss_e2.insert(2, Enemy { health: 100 });
+    ss_e2.insert(2, Enemy { health: 100 }).unwrap();
 
     tick(&mut app); // frame 5 -- 1 of rollback_window until despawn
 
@@ -188,10 +195,14 @@ fn despawn_revival_during_rollback() {
     // even though the Enemy component doesn't exist on e1 now, we can see a rollback happened
     // because the buffered older values have changed in accordance with the ServerSnapshot:
     assert_eq!(app.comp_val_at::<Enemy>(e1, 2).unwrap().health, 100);
-    assert_eq!(app.comp_val_at::<Enemy>(e1, 3).unwrap().health, 99);
+    assert_eq!(app.comp_val_at::<Enemy>(e1, 3).unwrap().health, 99); // x
     assert!(
-        app.comp_val_at::<Enemy>(e1, despawn_frame).is_none(),
-        "should have been despawned"
+        app.comp_val_at::<Enemy>(e1, despawn_frame).is_some(),
+        "should exist at the start of the frame it's despawned on"
+    );
+    assert!(
+        app.comp_val_at::<Enemy>(e1, despawn_frame + 1).is_none(),
+        "should have been despawned at despawn_frame + 1"
     );
 
     assert!(

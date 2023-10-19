@@ -6,13 +6,13 @@
 ///
 use crate::*;
 use bevy::prelude::*;
-use std::{collections::VecDeque, ops::Range};
+use std::{collections::VecDeque, fmt, ops::Range};
 
 /// values for new frames are push_front'ed onto the vecdeque
-#[derive(Debug, Resource, Clone)]
+#[derive(Resource, Clone)]
 pub struct FrameBuffer<T>
 where
-    T: Clone + Send + Sync + std::fmt::Debug,
+    T: Clone + Send + Sync + PartialEq + std::fmt::Debug,
 {
     /// Contains Option<T> because there can be gaps
     /// and we want to be able to store 'None' as a normal value in here.
@@ -20,32 +20,36 @@ where
     /// frame number of the first elem of vecdeque ie newest value. 0 = empty.
     front_frame: FrameNumber,
     capacity: usize,
+    pub name: String,
 }
 
-// impl<T> fmt::Debug for FrameBuffer<T>
-// where
-//     T: Clone + Send + Sync + std::fmt::Debug,
-// {
-//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-//         write!(
-//             f,
-//             "FrameBuffer{{front_frame:{:?}, capacity:{:?} entries:[{:?},...]}}",
-//             self.front_frame,
-//             self.capacity,
-//             self.get(self.newest_frame()),
-//         )
-//     }
-// }
+impl<T> fmt::Debug for FrameBuffer<T>
+where
+    T: Clone + Send + Sync + PartialEq + std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "FrameBuffer[{}]<{}>{{front_frame:{:?}, capacity:{:?} entries:[{:?},...]}}",
+            self.name,
+            std::any::type_name::<T>(),
+            self.front_frame,
+            self.capacity,
+            self.get(self.newest_frame()),
+        )
+    }
+}
 
 impl<T> FrameBuffer<T>
 where
-    T: Clone + Send + Sync + std::fmt::Debug,
+    T: Clone + Send + Sync + PartialEq + std::fmt::Debug,
 {
-    pub fn with_capacity(len: usize) -> Self {
+    pub fn with_capacity(len: usize, name: &str) -> Self {
         Self {
             entries: VecDeque::with_capacity(len),
             capacity: len,
             front_frame: 0,
+            name: name.into(),
         }
     }
 
@@ -75,9 +79,11 @@ where
             return;
         }
         if let Some(index) = self.index(frame) {
-            self.entries.drain(0..index);
+            self.entries.drain(0..index.min(self.entries.len()));
+            self.front_frame = frame;
+        } else {
+            error!("remove_entries_newer_than {frame} failed, no index.");
         }
-        self.front_frame = frame;
     }
 
     /// value at frame, or None if out of the range of values currently stored in the buffer
@@ -116,44 +122,65 @@ where
         }
     }
 
+    pub fn insert_blanks(&mut self, num_blanks: usize) {
+        for _ in 0..num_blanks {
+            self.entries.push_front(None);
+        }
+    }
+
+    // which frames have values?
+    pub fn frame_occupancy(&self) -> Vec<bool> {
+        self.entries.iter().map(|e| e.is_some()).collect::<Vec<_>>()
+    }
+
     /// insert value at given frame.
     /// It is permitted to insert at old frames that are still in the range, but
     /// not allowed to insert at a frame older than the oldest existing frame.
     ///
-    /// Is is permitted to insert at any future frame, any gaps will be make None.
+    /// Is is permitted to insert at any future frame, any gaps will be made None.
     /// so if you insert at newest_frame() + a gazillion, you gets a buffer containing your
     /// one new value and a bunch of Nones after it.
-    pub fn insert(&mut self, frame: FrameNumber, value: T) {
+    pub fn insert(&mut self, frame: FrameNumber, value: T) -> Result<(), TimewarpError> {
         // is this frame too old to be accepted?
         if frame < self.oldest_frame() {
             // probably outrageous lag or network desync or something? pretty bad.
-            error!(
-                "Frame too old! range: {:?} attempt: {frame} = {value:?}",
-                (
-                    self.front_frame,
-                    self.front_frame
-                        .saturating_sub(self.capacity as FrameNumber)
-                )
-            );
-            return;
+            // error!(
+            //     "Frame too old! range: {:?} attempt: {frame} = {value:?}",
+            //     (
+            //         self.front_frame,
+            //         self.front_frame
+            //             .saturating_sub(self.capacity as FrameNumber)
+            //     )
+            // );
+            return Err(TimewarpError::FrameTooOld);
         }
         // are we replacing a potential existing value, ie no change in buffer range
         if let Some(index) = self.index(frame) {
             if let Some(val) = self.entries.get_mut(index) {
+                // TODO should we test if we are we replacing with same-val that already exists,
+                // and bail out here? would still need to avoid mutably derefing the SS somehow.
                 *val = Some(value);
             }
-            return;
+            return Ok(());
         }
-        // so we are inserting a frame greater than front_frame.
-        // any gaps between current `front_frame` and `frame` need to be created as None
-        for _ in (self.front_frame + 1)..frame {
-            // print!("{self:?} ...  Inserting a None val @ {f}\n");
-            self.entries.push_front(None);
+        if self.front_frame == 0 || frame == self.front_frame + 1 {
+            // no gaps.
+        } else {
+            // so we are inserting a frame greater than front_frame.
+            // any gaps between current `front_frame` and `frame` need to be created as None
+            // warn!(
+            //     "inserting f {frame}, front_frame currently: {} {self:?}",
+            //     self.front_frame
+            // );
+            for _f in (self.front_frame + 1)..frame {
+                self.entries.push_front(None);
+            }
         }
 
         self.entries.push_front(Some(value));
         self.front_frame = frame;
         self.entries.truncate(self.capacity);
+        Ok(())
     }
 
     /// gets index into vecdeq for frame number, or None if out of range.
@@ -185,34 +212,34 @@ mod tests {
 
     #[test]
     fn test_frame_buffer() {
-        let mut fb = FrameBuffer::<u32>::with_capacity(5);
-        fb.insert(1, 1);
+        let mut fb = FrameBuffer::<u32>::with_capacity(5, "");
+        fb.insert(1, 1).unwrap();
         assert_eq!(fb.get(1), Some(&1));
 
-        fb.insert(2, 2);
+        fb.insert(2, 2).unwrap();
         // print!("{fb:?}");
-        fb.insert(3, 3);
-        fb.insert(4, 4);
-        fb.insert(5, 5);
+        fb.insert(3, 3).unwrap();
+        fb.insert(4, 4).unwrap();
+        fb.insert(5, 5).unwrap();
         assert_eq!(fb.get(1), Some(&1));
         assert_eq!(fb.get(3), Some(&3));
         assert_eq!(fb.get(5), Some(&5));
         assert_eq!(fb.get(6), None);
-        fb.insert(6, 6);
+        fb.insert(6, 6).unwrap();
         assert_eq!(fb.get(6), Some(&6));
         // 1 should be dropped now
         assert_eq!(fb.get(1), None);
         // now test modifying a val by inserting over
         assert_eq!(fb.get(3), Some(&3));
-        fb.insert(3, 33);
+        fb.insert(3, 33).unwrap();
         assert_eq!(fb.get(3), Some(&33));
         // test modifying by get_mut
         let v2 = fb.get_mut(2).unwrap();
         *v2 = 22;
-        fb.insert(2, 22);
+        fb.insert(2, 22).unwrap();
         assert_eq!(fb.newest_frame(), 6);
         // inserting with a gap should fill with nones
-        fb.insert(8, 8);
+        fb.insert(8, 8).unwrap();
         assert_eq!(fb.get(7), None);
         assert_eq!(fb.get(8), Some(&8));
         assert_eq!(fb.newest_frame(), 8);

@@ -164,20 +164,15 @@ fn spawning_in_the_past() {
     assert_eq!(app.comp_val_at::<Enemy>(e3, 5).unwrap().health, 997);
 }
 
-/*
-error i noticed during game dev:
-client is at frame 10.
-messages arrive from server causing client to want to:
-* insert an entity in the past, at frame 7.
-* update server snapshot for something at frame 8
-
-the update SS thing will do insert_resource and replace the rb to 7 with 8
-then the initial value of the past-entity comps won't exist at f8, since we
-birthed it at f7 --> boom.
-*/
 #[test]
-fn spawning_in_the_past_with_ss() {
+fn spawning_in_the_past_with_ss_partial_updates() {
     let mut app = setup_test_app();
+
+    // this test modifies distinct things in the past at two different frames during the same tick, so:
+    {
+        let mut tw_config = app.world.get_resource_mut::<TimewarpConfig>().unwrap();
+        tw_config.set_consolidation_strategy(RollbackConsolidationStrategy::Oldest);
+    }
 
     app.register_rollback::<Enemy>();
 
@@ -226,7 +221,7 @@ fn spawning_in_the_past_with_ss() {
         .id();
 
     let mut ss = app.world.get_mut::<ServerSnapshot<Enemy>>(e1).unwrap();
-    ss.insert(3, Enemy { health: 1000 });
+    ss.insert(3, Enemy { health: 1000 }).unwrap();
 
     tick(&mut app); // frame 5 - will trigger rollback
 

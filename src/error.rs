@@ -4,7 +4,7 @@
 #[derive(Debug)]
 pub enum TimewarpError {
     Io(std::io::Error),
-    SequenceBufferFull,
+    FrameTooOld,
 }
 
 impl std::fmt::Display for TimewarpError {
