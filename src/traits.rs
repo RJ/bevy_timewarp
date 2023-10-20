@@ -83,7 +83,7 @@ impl TimewarpTraits for App {
             );
         }
         self.add_systems(
-            schedule.clone(), // TODO RJRJ MOVE FILE
+            schedule.clone(),
             prefix_first::record_component_death::<T>
                 .run_if(not(resource_exists::<Rollback>()))
                 .in_set(TimewarpPrefixSet::First),
@@ -120,7 +120,6 @@ impl TimewarpTraits for App {
                 postfix_components::remove_components_from_despawning_entities::<T>,
                 postfix_components::record_component_history::<T>,
                 postfix_components::add_timewarp_components::<T, CORRECTION_LOGGING>,
-                postfix_components::record_component_birth::<T>,
             )
                 .in_set(TimewarpPostfixSet::Components),
         );

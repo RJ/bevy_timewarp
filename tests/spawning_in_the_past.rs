@@ -22,18 +22,6 @@ fn log_all(game_clock: Res<GameClock>, q: Query<(Entity, &Enemy, &EntName)>) {
     }
 }
 
-/*
-error i noticed during game dev:
-client is at frame 10.
-messages arrive from server causing client to want to:
-* insert an entity in the past, at frame 7.
-* update server snapshot for something at frame 8
-
-the update SS thing will do insert_resource and replace the rb to 7 with 8
-then the initial value of the past-entity comps won't exist at f8, since we
-birthed it at f7 --> boom.
-*/
-
 #[test]
 fn spawning_in_the_past() {
     let mut app = setup_test_app();

@@ -77,12 +77,6 @@ pub(crate) fn apply_snapshots_and_maybe_rollback<T: TimewarpComponent>(
             }
         }
 
-        // if !comp_hist.alive_at_frame(snap_frame) {
-        //     info!("Setting liveness for {snap_frame} {entity:?} {comp_from_snapshot:?} ");
-        //     comp_hist.report_birth_at_frame(snap_frame);
-        //     assert!(comp_hist.at_frame(snap_frame).is_some());
-        // }
-
         if snap_frame < **game_clock {
             debug!(
                 "Triggering rollback due to snapshot. {entity:?} snap_frame: {snap_frame} {}",

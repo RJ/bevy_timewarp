@@ -132,37 +132,3 @@ pub(crate) fn add_timewarp_components<T: TimewarpComponent, const CORRECTION_LOG
         ));
     }
 }
-
-/// record component lifetimes
-/// won't be called first time comp is added, since it won't have a ComponentHistory yet.
-/// only for comp removed ... then readded birth
-/// TODO not sure if we need this birth tracking at all?
-pub(crate) fn record_component_birth<T: TimewarpComponent>(
-    mut q: Query<(Entity, &mut ComponentHistory<T>), (Added<T>, Without<NoRollback>)>,
-    game_clock: Res<GameClock>,
-    rb: Option<Res<Rollback>>,
-) {
-    return;
-    // no. implied by inserting values to CH!
-
-    // during rollback, components are removed and readded.
-    // but we don't want to log the same as outside of rollback, we want to ignore.
-    // however this system still runs, so that the Added<T> filters update their markers
-    // otherwise things added during rollback would all show as Added the first frame back.
-    if rb.is_some() {
-        return;
-    }
-
-    for (entity, mut ch) in q.iter_mut() {
-        trace!(
-            "{entity:?} Component birth @ {:?} {:?}",
-            game_clock.frame(),
-            std::any::type_name::<T>()
-        );
-        ch.report_birth_at_frame(**game_clock);
-        assert!(
-            ch.at_frame(**game_clock).is_some(),
-            "Reported birth, but no CH value stored"
-        );
-    }
-}
