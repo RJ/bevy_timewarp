@@ -58,9 +58,9 @@ impl TimewarpTraits for App {
         );
         self.add_systems(
             schedule.clone(),
-            prefix_check_if_rollback_needed::request_rollback_for_blueprints::<T>
-                .before(prefix_check_if_rollback_needed::consolidate_rollback_requests)
-                .in_set(TimewarpPrefixSet::CheckIfRollbackNeeded),
+            prefix_not_in_rollback::request_rollback_for_blueprints::<T>
+                .before(prefix_not_in_rollback::consolidate_rollback_requests)
+                .in_set(TimewarpPrefixSet::NotInRollback),
         )
     }
     fn register_rollback_with_options<T: TimewarpComponent, const CORRECTION_LOGGING: bool>(
@@ -84,8 +84,7 @@ impl TimewarpTraits for App {
         }
         self.add_systems(
             schedule.clone(), // TODO RJRJR move to _first file?
-            prefix_check_if_rollback_needed::detect_misuse_of_icaf::<T>
-                .in_set(TimewarpPrefixSet::First),
+            prefix_not_in_rollback::detect_misuse_of_icaf::<T>.in_set(TimewarpPrefixSet::First),
         );
         self.add_systems(
             schedule.clone(), // TODO RJRJ MOVE FILE
@@ -102,15 +101,12 @@ impl TimewarpTraits for App {
         self.add_systems(
             schedule.clone(),
             (
-                prefix_check_if_rollback_needed::detect_misuse_of_icaf::<T>,
-                prefix_check_if_rollback_needed::unpack_icafs_and_maybe_rollback::<
-                    T,
-                    CORRECTION_LOGGING,
-                >,
-                prefix_check_if_rollback_needed::apply_snapshots_and_maybe_rollback::<T>,
+                prefix_not_in_rollback::detect_misuse_of_icaf::<T>,
+                prefix_not_in_rollback::unpack_icafs_and_maybe_rollback::<T, CORRECTION_LOGGING>,
+                prefix_not_in_rollback::apply_snapshots_and_maybe_rollback::<T>,
             )
-                .before(prefix_check_if_rollback_needed::consolidate_rollback_requests)
-                .in_set(TimewarpPrefixSet::CheckIfRollbackNeeded),
+                .before(prefix_not_in_rollback::consolidate_rollback_requests)
+                .in_set(TimewarpPrefixSet::NotInRollback),
         );
         self.add_systems(
             schedule.clone(),
@@ -135,10 +131,10 @@ impl TimewarpTraits for App {
         self.add_systems(
             schedule.clone(),
             (
-                postfix_during_rollback::rekill_components_during_rollback::<T>,
-                postfix_during_rollback::clear_removed_components_queue::<T>,
+                postfix_in_rollback::rekill_components_during_rollback::<T>,
+                postfix_in_rollback::clear_removed_components_queue::<T>,
             )
-                .in_set(TimewarpPostfixSet::DuringRollback),
+                .in_set(TimewarpPostfixSet::InRollback),
         )
     }
 }

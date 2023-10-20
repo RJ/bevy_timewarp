@@ -135,9 +135,9 @@ New custom events are written to the bevy event queue, to be consumed by my game
 <td>During rollback, we check if we should exit rollback, having resimulated everything in the requested rollback range.</td>
 </tr>
 <tr>
-<td>CheckIfRollbackNeeded</td>
+<td>NotInRollback</td>
 <td>not in rb</td>
-<td>Check if a newly added ServerSnapshot or ABAF/ICAF means we should rollback</td>
+<td>Check if a newly added ServerSnapshot or ABAF/ICAF means we request a rollback</td>
 </tr>
 <tr>
 <td>StartRollback</td>
@@ -258,7 +258,7 @@ record component births.
 </td>
 </tr>
 <tr>
-<td>DuringRollback</td>
+<td>InRollback</td>
 <td>in rb</td>
 <td>
 wipe removed component queue, remove components which shouldn't exist at this frame
@@ -287,7 +287,7 @@ wipe removed component queue, remove components which shouldn't exist at this fr
 ## How rollbacks happen
 
 Systems that initiate rollbacks write a `RollbackRequest` to an event queue, specifying the frame they
-wish to start resimulating from. These are in the `CheckIfRollbackNeeded` set.
+wish to start resimulating from. These are in the `NotInRollback` set.
 
 All rollback requests are consolidated, and a `Rollback` resource is written. The `RollbackConsolidationStrategy` from `TimewarpConfig`
 determines if the oldest or newest frame from the list of requests is used.

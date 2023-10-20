@@ -2,13 +2,13 @@ use crate::prelude::*;
 use bevy::prelude::*;
 
 pub(crate) mod postfix_components;
-pub(crate) mod postfix_during_rollback;
+pub(crate) mod postfix_in_rollback;
 pub(crate) mod postfix_last;
 
 pub(crate) mod prefix_blueprints;
-pub(crate) mod prefix_check_if_rollback_needed;
 pub(crate) mod prefix_first;
 pub(crate) mod prefix_in_rollback;
+pub(crate) mod prefix_not_in_rollback;
 pub(crate) mod prefix_start_rollback;
 
 /// footgun protection - in case your clock ticking fn isn't running properly, this avoids

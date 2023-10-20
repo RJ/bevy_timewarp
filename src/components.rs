@@ -1,10 +1,10 @@
 use crate::{prelude::TimewarpError, FrameBuffer, FrameNumber, TimewarpComponent};
 use bevy::prelude::*;
 
-/// entities with NotRollbackable are ignored, even if they have components which
+/// entities with NoRollback are ignored, even if they have components which
 /// have been registered for rollback.
 #[derive(Component)]
-pub struct NotRollbackable;
+pub struct NoRollback;
 
 /// Added to every entity, for tracking which frame they were last synced to a snapshot
 /// Deduct `last_snapshot_frame` from the current frame to determine how many frames this
@@ -32,6 +32,9 @@ impl TimewarpStatus {
 
 /// Used when you want to insert a component T, but for an older frame.
 /// insert this to an entity for an older frame will trigger a rollback.
+///
+/// Note: this is for timewarp-registered components.
+///
 /// eg:
 /// ```rust,ignore
 /// commands.entity(e).insert(InsertComponentAtFrame::<Shield>(shield_comp, past_frame))
@@ -47,13 +50,18 @@ impl<T: TimewarpComponent> InsertComponentAtFrame<T> {
     }
 }
 
-/// For assembling a blueprint in the past - testing.
+/// When you want to rollback to insert a non-timewarp component at a specific frame, insert this.
+///
+/// Note: this is for non-timewarp registered components. (ones without ComponentHistory)
+///
+/// I use this for blueprints. The blueprint assembly function runs during rollback and
+/// adds the various timewarp-registered (and other) components to the entity during rollback.
 #[derive(Component, Debug)]
-pub struct AssembleBlueprintAtFrame<T: TimewarpComponent> {
+pub struct AssembleBlueprintAtFrame<T: Component> {
     pub component: T,
     pub frame: FrameNumber,
 }
-impl<T: TimewarpComponent> AssembleBlueprintAtFrame<T> {
+impl<T: Component> AssembleBlueprintAtFrame<T> {
     pub fn new(frame: FrameNumber, component: T) -> Self {
         Self { component, frame }
     }
@@ -61,12 +69,6 @@ impl<T: TimewarpComponent> AssembleBlueprintAtFrame<T> {
         std::any::type_name::<T>()
     }
 }
-
-/// presence on an entity during rollback means there will be no older values available,
-/// since the entity is being assembled from blueprint this frame.
-/// so we load in component values matching the origin frame (not one frame prior, like usual)
-#[derive(Component, Debug, Clone)]
-pub struct OriginFrame(pub FrameNumber);
 
 /// entities with components that were registered with error correction logging will receive
 /// one of these components, updated with before/after values when a simulation correction

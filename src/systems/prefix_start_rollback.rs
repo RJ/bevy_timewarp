@@ -77,25 +77,12 @@ enum Provenance {
 pub(crate) fn rollback_component<T: TimewarpComponent>(
     rb: Res<Rollback>,
     // T is None in case where component removed but ComponentHistory persists
-    mut q: Query<
-        (
-            Entity,
-            Option<&mut T>,
-            &ComponentHistory<T>,
-            Option<&OriginFrame>,
-        ),
-        Without<NotRollbackable>,
-    >,
+    mut q: Query<(Entity, Option<&mut T>, &ComponentHistory<T>), Without<NoRollback>>,
     mut commands: Commands,
     game_clock: Res<GameClock>,
 ) {
-    for (entity, opt_comp, comp_hist, opt_originframe) in q.iter_mut() {
-        let rollback_frame = if let Some(OriginFrame(of)) = opt_originframe {
-            game_clock.frame().max(*of)
-        } else {
-            **game_clock
-        };
-
+    for (entity, opt_comp, comp_hist) in q.iter_mut() {
+        let rollback_frame = **game_clock;
         let end_frame = rb.range.end;
 
         let prefix = if rollback_frame != **game_clock {

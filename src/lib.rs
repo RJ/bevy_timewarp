@@ -205,47 +205,25 @@ pub mod prelude {
 use bevy::prelude::*;
 use prelude::*;
 
+/// bevy_timewarp's pre-game systems run in these sets, which get configured to run
+/// before the main game logic (the set for which is provided in the plugin setup)
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TimewarpPrefixSet {
     First,
-
     InRollback,
-
-    /// Doesn't run in rollback
-    ///
-    /// Contains:
-    /// * detect_misuse_of_icaf<T>
-    /// * trigger_rollback_when_snapshot_added<T>
-    /// * trigger_rollback_when_icaf_added<T>
-    /// then:
-    /// * consolidate_rollback_requests
-    /// then:
-    /// * apply_deferred (so the Rollback res might exist, Ch/SS added.)
-    CheckIfRollbackNeeded,
-
-    /// Runs only if the Rollback resource was just Added<>
-    ///
-    /// * rollback_initiated
-    /// then:
-    /// * rollback_component<T>
-    /// * rollback_component<T>
-    /// ...
+    NotInRollback,
     StartRollback,
-
-    /// Runs always, unpacks non-timewarp components at this frame.
-    /// Current used for blueprints.
     UnwrapBlueprints,
-
     Last,
 }
 
-/// bevy_timewarp's systems run in these three sets, which get configured to run
+/// bevy_timewarp's post-game systems run in these sets, which get configured to run
 /// after the main game logic (the set for which is provided in the plugin setup)
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TimewarpPostfixSet {
     First,
     Components,
-    DuringRollback,
+    InRollback,
     Last,
 }
 
@@ -276,8 +254,7 @@ impl Plugin for TimewarpPlugin {
                     TimewarpPrefixSet::First,
                     TimewarpPrefixSet::InRollback.run_if(resource_exists::<Rollback>()),
                     // -- apply_deferred -- //
-                    TimewarpPrefixSet::CheckIfRollbackNeeded
-                        .run_if(not(resource_exists::<Rollback>())),
+                    TimewarpPrefixSet::NotInRollback.run_if(not(resource_exists::<Rollback>())),
                     // -- apply_deferred -- //
                     TimewarpPrefixSet::StartRollback.run_if(resource_added::<Rollback>()),
                     TimewarpPrefixSet::UnwrapBlueprints,
@@ -293,12 +270,12 @@ impl Plugin for TimewarpPlugin {
                 self.config.schedule(),
                 apply_deferred
                     .after(TimewarpPrefixSet::InRollback)
-                    .before(TimewarpPrefixSet::CheckIfRollbackNeeded),
+                    .before(TimewarpPrefixSet::NotInRollback),
             )
             .add_systems(
                 self.config.schedule(),
                 apply_deferred
-                    .after(TimewarpPrefixSet::CheckIfRollbackNeeded)
+                    .after(TimewarpPrefixSet::NotInRollback)
                     .before(TimewarpPrefixSet::StartRollback),
             )
             //
@@ -358,11 +335,11 @@ impl Plugin for TimewarpPlugin {
             .add_systems(
                 self.config.schedule(),
                 (
-                    systems::prefix_check_if_rollback_needed::consolidate_rollback_requests,
+                    systems::prefix_not_in_rollback::consolidate_rollback_requests,
                     apply_deferred,
                 )
                     .chain()
-                    .in_set(TimewarpPrefixSet::CheckIfRollbackNeeded),
+                    .in_set(TimewarpPrefixSet::NotInRollback),
             )
             .add_systems(
                 self.config.schedule(),
@@ -381,7 +358,7 @@ impl Plugin for TimewarpPlugin {
                 (
                     TimewarpPostfixSet::First,
                     TimewarpPostfixSet::Components,
-                    TimewarpPostfixSet::DuringRollback.run_if(resource_exists::<Rollback>()),
+                    TimewarpPostfixSet::InRollback.run_if(resource_exists::<Rollback>()),
                     TimewarpPostfixSet::Last,
                 )
                     .chain(),

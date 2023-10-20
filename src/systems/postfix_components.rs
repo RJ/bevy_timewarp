@@ -17,7 +17,7 @@ fn debug_type<T: TimewarpComponent>() -> bool {
 pub(crate) fn remove_components_from_despawning_entities<T: TimewarpComponent>(
     mut q: Query<
         (Entity, &mut ComponentHistory<T>, &DespawnMarker),
-        (Added<DespawnMarker>, With<T>),
+        (Added<DespawnMarker>, With<T>, Without<NoRollback>),
     >,
     mut commands: Commands,
     game_clock: Res<GameClock>,
@@ -36,12 +36,15 @@ pub(crate) fn remove_components_from_despawning_entities<T: TimewarpComponent>(
 
 /// Write current value of component to the ComponentHistory buffer for this frame
 pub(crate) fn record_component_history<T: TimewarpComponent>(
-    mut q: Query<(
-        Entity,
-        &T,
-        &mut ComponentHistory<T>,
-        Option<&mut TimewarpCorrection<T>>,
-    )>,
+    mut q: Query<
+        (
+            Entity,
+            &T,
+            &mut ComponentHistory<T>,
+            Option<&mut TimewarpCorrection<T>>,
+        ),
+        Without<NoRollback>,
+    >,
     game_clock: Res<GameClock>,
     mut commands: Commands,
     opt_rb: Option<Res<Rollback>>,
@@ -96,14 +99,7 @@ pub(crate) fn record_component_history<T: TimewarpComponent>(
 /// add the ComponentHistory<T> and ServerSnapshot<T> whenever an entity gets the T component.
 /// NB: you must have called `app.register_rollback::<T>()` for this to work.
 pub(crate) fn add_timewarp_components<T: TimewarpComponent, const CORRECTION_LOGGING: bool>(
-    q: Query<
-        (Entity, &T),
-        (
-            Added<T>,
-            Without<NotRollbackable>,
-            Without<ComponentHistory<T>>,
-        ),
-    >,
+    q: Query<(Entity, &T), (Added<T>, Without<NoRollback>, Without<ComponentHistory<T>>)>,
     mut commands: Commands,
     game_clock: Res<GameClock>,
     timewarp_config: Res<TimewarpConfig>,
@@ -142,7 +138,7 @@ pub(crate) fn add_timewarp_components<T: TimewarpComponent, const CORRECTION_LOG
 /// only for comp removed ... then readded birth
 /// TODO not sure if we need this birth tracking at all?
 pub(crate) fn record_component_birth<T: TimewarpComponent>(
-    mut q: Query<(Entity, &mut ComponentHistory<T>), (Added<T>, Without<NotRollbackable>)>,
+    mut q: Query<(Entity, &mut ComponentHistory<T>), (Added<T>, Without<NoRollback>)>,
     game_clock: Res<GameClock>,
     rb: Option<Res<Rollback>>,
 ) {
