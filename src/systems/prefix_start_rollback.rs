@@ -21,35 +21,25 @@ pub(crate) fn rollback_initiated(
     mut rb_stats: ResMut<RollbackStats>,
     timewarp_config: Res<TimewarpConfig>,
 ) {
-    // during syncing large worlds, we kinda have to skip impossible rollbacks until things catch up
-    // TODO revise comment:
     // if we're trying to roll back further than our configured rollback window,
     // all sorts of things will fail spectacularly, so i'm just going to panic for now.
     // i think the way to handle this is in the game, if you get an update from the past older
     // than the window that you can't afford to ignore, like a reliable spawn message, then
-    // perhaps modify the spawn frame to the oldest allowable frame within the window,
-    // and rely on snapshots to sort you out.
+    // deal with it and don't tell timewarp.
     if rb.range.end - rb.range.start >= timewarp_config.rollback_window {
         panic!(
             "⚠️⚠️⚠️ Attempted to rollback further than rollback_window: {rb:?} @ {:?}",
             game_clock.frame()
         );
-        // error!("⚠️⚠️⚠️ Ignoring this rollback request. 🛼 ");
-        // TODO this isn't really safe - what if there was an ICAF or ABAF and then it never
-        // gets unpacked because it was outside the window.
-        // perhaps we need to mark the RB as "desperate", rollback to the oldest frame,
-        // and unpack anything destined for an even older (oob) frame that go around.
-        // at least unpack the ABAF ones, maybe don't care about SS in a desperate rollback.
-        // commands.remove_resource::<Rollback>();
-        // return;
     }
     // save original period for restoration after rollback completion
     rb.original_period = Some(fx.period);
     rb_stats.num_rollbacks += 1;
+    let depth = rb.range.end - rb.range.start + 1;
     // we wind clock back 1 past first resim frame, so we can load in data for the frame prior
     // so we go into our first resim frame with components in the correct state.
     let reset_game_clock_to = rb.range.start.saturating_sub(1);
-    info!("🛼 ROLLBACK RESOURCE ADDED (rb#{}), reseting game clock from {game_clock:?}-->{reset_game_clock_to} rb:{rb:?}", 
+    info!("🛼 ROLLBACK RESOURCE ADDED (rb#{} depth={depth}), reseting game clock from {game_clock:?}-->{reset_game_clock_to} rb:{rb:?}", 
                 rb_stats.num_rollbacks);
     // make fixed-update ticks free, ie fast-forward the simulation at max speed
     fx.period = Duration::ZERO;

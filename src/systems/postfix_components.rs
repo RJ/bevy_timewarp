@@ -142,6 +142,9 @@ pub(crate) fn record_component_birth<T: TimewarpComponent>(
     game_clock: Res<GameClock>,
     rb: Option<Res<Rollback>>,
 ) {
+    return;
+    // no. implied by inserting values to CH!
+
     // during rollback, components are removed and readded.
     // but we don't want to log the same as outside of rollback, we want to ignore.
     // however this system still runs, so that the Added<T> filters update their markers

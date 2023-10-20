@@ -10,7 +10,7 @@ use bevy::prelude::*;
 
 /// Blueprint components stay wrapped up until their target frame, then we unwrap them
 /// so the assembly systems can decorate them with various other components at that frame.
-pub(crate) fn unwrap_blueprints_at_target_frame<T: TimewarpComponent>(
+pub(crate) fn unwrap_blueprints_at_target_frame<T: Component + std::fmt::Debug + Clone>(
     q: Query<(Entity, &AssembleBlueprintAtFrame<T>)>,
     mut commands: Commands,
     game_clock: Res<GameClock>,

@@ -1,4 +1,4 @@
-use bevy::prelude::*;
+use bevy::{ecs::query::Has, prelude::*};
 use bevy_timewarp::prelude::*;
 
 mod test_utils;
@@ -20,7 +20,18 @@ fn take_damage(mut q: Query<(Entity, &mut Enemy, &EntName, Option<&Shield>)>) {
     }
 }
 
-fn log_all(game_clock: Res<GameClock>, q: Query<(Entity, &Enemy, &EntName, Option<&Shield>)>) {
+fn log_all(
+    game_clock: Res<GameClock>,
+    q: Query<(
+        Entity,
+        &Enemy,
+        &EntName,
+        Option<&Shield>,
+        Option<&TimewarpStatus>,
+        Has<ComponentHistory<Shield>>,
+        Has<ServerSnapshot<Shield>>,
+    )>,
+) {
     for tuple in q.iter() {
         info!("f:{:?} {tuple:?}", game_clock.frame());
     }
@@ -156,7 +167,7 @@ fn component_add_and_remove() {
     //     .entity_mut(e1)
     //     .insert(InsertComponentAtFrame::<Shield>::new(8, new_shield));
 
-    tick(&mut app); // frame 10
+    tick(&mut app); // frame 10 - rb
 
     assert_eq!(
         app.world

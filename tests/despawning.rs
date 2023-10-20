@@ -170,8 +170,8 @@ fn despawn_revival_during_rollback() {
     );
 
     // generate a rollback that should revive the component temporarily
-    let mut ss_e2 = app.world.get_mut::<ServerSnapshot<Enemy>>(e1).unwrap();
-    ss_e2.insert(2, Enemy { health: 100 }).unwrap();
+    let mut ss_e1 = app.world.get_mut::<ServerSnapshot<Enemy>>(e1).unwrap();
+    ss_e1.insert(2, Enemy { health: 100 }).unwrap();
 
     tick(&mut app); // frame 5 -- 1 of rollback_window until despawn
 

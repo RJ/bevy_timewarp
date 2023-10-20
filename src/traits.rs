@@ -83,10 +83,6 @@ impl TimewarpTraits for App {
             );
         }
         self.add_systems(
-            schedule.clone(), // TODO RJRJR move to _first file?
-            prefix_not_in_rollback::detect_misuse_of_icaf::<T>.in_set(TimewarpPrefixSet::First),
-        );
-        self.add_systems(
             schedule.clone(), // TODO RJRJ MOVE FILE
             prefix_first::record_component_death::<T>
                 .run_if(not(resource_exists::<Rollback>()))
@@ -101,8 +97,8 @@ impl TimewarpTraits for App {
         self.add_systems(
             schedule.clone(),
             (
-                prefix_not_in_rollback::detect_misuse_of_icaf::<T>,
-                prefix_not_in_rollback::unpack_icafs_and_maybe_rollback::<T, CORRECTION_LOGGING>,
+                prefix_not_in_rollback::unpack_icafs_into_tw_components::<T, CORRECTION_LOGGING>,
+                prefix_not_in_rollback::unpack_icafs_adding_tw_components::<T, CORRECTION_LOGGING>,
                 prefix_not_in_rollback::apply_snapshots_and_maybe_rollback::<T>,
             )
                 .before(prefix_not_in_rollback::consolidate_rollback_requests)

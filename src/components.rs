@@ -6,18 +6,21 @@ use bevy::prelude::*;
 #[derive(Component)]
 pub struct NoRollback;
 
-/// Added to every entity, for tracking which frame they were last synced to a snapshot
-/// Deduct `last_snapshot_frame` from the current frame to determine how many frames this
-/// entity is predicted ahead for.
-#[derive(Component)]
+/// Added to every entity for metrics
+#[derive(Component, Debug)]
 pub struct TimewarpStatus {
+    /// Deduct `last_snapshot_frame` from the current frame to determine how many frames this
+    /// entity is predicted ahead for.
     last_snapshot_frame: FrameNumber,
+    /// Incremented when an update to this entity caused a rollback to be requested
+    rollback_triggers: u32,
 }
 
 impl TimewarpStatus {
     pub fn new(last_snapshot_frame: FrameNumber) -> Self {
         Self {
             last_snapshot_frame,
+            rollback_triggers: 0,
         }
     }
     /// returns the frame of the most recent snapshot,
@@ -25,8 +28,16 @@ impl TimewarpStatus {
     pub fn last_snap_frame(&self) -> FrameNumber {
         self.last_snapshot_frame
     }
+    /// how many times did this entity cause a rollback to be requested
+    pub fn rollback_triggers(&self) -> u32 {
+        self.rollback_triggers
+    }
+
     pub fn set_snapped_at(&mut self, frame: FrameNumber) {
         self.last_snapshot_frame = self.last_snapshot_frame.max(frame);
+    }
+    pub fn increment_rollback_triggers(&mut self) {
+        self.rollback_triggers += 1;
     }
 }
 
@@ -57,11 +68,11 @@ impl<T: TimewarpComponent> InsertComponentAtFrame<T> {
 /// I use this for blueprints. The blueprint assembly function runs during rollback and
 /// adds the various timewarp-registered (and other) components to the entity during rollback.
 #[derive(Component, Debug)]
-pub struct AssembleBlueprintAtFrame<T: Component> {
+pub struct AssembleBlueprintAtFrame<T: Component + std::fmt::Debug + Clone> {
     pub component: T,
     pub frame: FrameNumber,
 }
-impl<T: Component> AssembleBlueprintAtFrame<T> {
+impl<T: Component + std::fmt::Debug + Clone> AssembleBlueprintAtFrame<T> {
     pub fn new(frame: FrameNumber, component: T) -> Self {
         Self { component, frame }
     }
@@ -162,7 +173,12 @@ impl<T: TimewarpComponent> ComponentHistory<T> {
         entity: &Entity,
     ) -> Result<(), TimewarpError> {
         trace!("CH.Insert {entity:?} {frame} = {val:?}");
-        self.values.insert(frame, val)
+        // TODO this is inefficient atm
+        self.values.insert(frame, val)?;
+        if !self.alive_at_frame(frame) {
+            self.report_birth_at_frame(frame);
+        }
+        Ok(())
     }
 
     /// removes values buffered for this frame, and greater frames.
@@ -190,6 +206,9 @@ impl<T: TimewarpComponent> ComponentHistory<T> {
             self.values.get(frame).is_some(),
             "No stored component value when reporting birth @ {frame}"
         );
+        if self.alive_ranges.last().unwrap().1 == Some(frame) {
+            return;
+        }
         self.alive_ranges.push((frame, None));
     }
     pub fn report_death_at_frame(&mut self, frame: FrameNumber) {
@@ -202,16 +221,18 @@ impl<T: TimewarpComponent> ComponentHistory<T> {
             return;
         }
 
-        trace!(
-            "component death @ {frame} {:?} {:?}",
-            std::any::type_name::<T>(),
-            self.alive_ranges
-        );
-
         assert!(
             self.alive_at_frame(frame),
             "Can't report death of component not alive"
         );
+        if self.alive_ranges.last().unwrap().1 == Some(frame) {
+            return;
+        }
         self.alive_ranges.last_mut().unwrap().1 = Some(frame);
+        trace!(
+            "component death @ {frame} {:?} --> {:?}",
+            std::any::type_name::<T>(),
+            self.alive_ranges
+        );
     }
 }

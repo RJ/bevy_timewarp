@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 /*
     NOTE: Timewarp Prefix Systems run at the top of FixedUpdate:
         * RIGHT BEFORE THE GameClock IS INCREMENTED.
@@ -7,16 +9,6 @@
 */
 use crate::prelude::*;
 use bevy::prelude::*;
-
-/// Don't insert ICAFs if the SS exists, use the SS.
-/// can probably support this later, but keeps things simpler for now.
-pub(crate) fn detect_misuse_of_icaf<T: TimewarpComponent>(
-    q: Query<(Entity, &ServerSnapshot<T>, &InsertComponentAtFrame<T>)>,
-) {
-    for (e, _ss, icaf) in q.iter() {
-        panic!("ICAF and SS exist on {e:?} {icaf:?}");
-    }
-}
 
 /// If a new snapshot was added to SS, we may need to initiate a rollback
 pub(crate) fn apply_snapshots_and_maybe_rollback<T: TimewarpComponent>(
@@ -73,23 +65,23 @@ pub(crate) fn apply_snapshots_and_maybe_rollback<T: TimewarpComponent>(
         match comp_hist.insert(snap_frame, comp_from_snapshot.clone(), &entity) {
             Ok(()) => (),
             Err(err) => {
+                rb_stats.range_faults += 1;
                 // probably FrameTooOld.
-                error!(
+                panic!(
                     "{err:?} {entity:?} apply_snapshots_and_maybe_rollback({}) - skipping",
                     comp_hist.type_name()
                 );
-                rb_stats.range_faults += 1;
                 // we can't rollback to this
                 // this is bad.
-                continue;
+                // continue;
             }
         }
 
-        if !comp_hist.alive_at_frame(snap_frame) {
-            info!("Setting liveness for {snap_frame} {entity:?} {comp_from_snapshot:?} ");
-            comp_hist.report_birth_at_frame(snap_frame);
-            assert!(comp_hist.at_frame(snap_frame).is_some());
-        }
+        // if !comp_hist.alive_at_frame(snap_frame) {
+        //     info!("Setting liveness for {snap_frame} {entity:?} {comp_from_snapshot:?} ");
+        //     comp_hist.report_birth_at_frame(snap_frame);
+        //     assert!(comp_hist.at_frame(snap_frame).is_some());
+        // }
 
         if snap_frame < **game_clock {
             debug!(
@@ -102,27 +94,39 @@ pub(crate) fn apply_snapshots_and_maybe_rollback<T: TimewarpComponent>(
             rb_ev.send(RollbackRequest::resimulate_this_frame_onwards(
                 snap_frame + 1,
             ));
+            tw_status.increment_rollback_triggers();
         }
     }
 }
 
-/// Move ICAF data to the SS.
+/// Move ICAF data to the SS and add SS, because it's missing.
 ///
 /// if an ICAF was inserted, we may need to rollback.
 ///
-pub(crate) fn unpack_icafs_and_maybe_rollback<
+pub(crate) fn unpack_icafs_adding_tw_components<
     T: TimewarpComponent,
     const CORRECTION_LOGGING: bool,
 >(
-    q: Query<(Entity, &InsertComponentAtFrame<T>), Added<InsertComponentAtFrame<T>>>,
+    mut q: Query<
+        (
+            Entity,
+            &InsertComponentAtFrame<T>,
+            Option<&mut TimewarpStatus>,
+        ),
+        (
+            Added<InsertComponentAtFrame<T>>,
+            Without<NoRollback>,
+            Without<ServerSnapshot<T>>,
+            Without<ComponentHistory<T>>,
+        ),
+    >,
     mut commands: Commands,
     timewarp_config: Res<TimewarpConfig>,
     game_clock: Res<GameClock>,
     mut rb_ev: ResMut<Events<RollbackRequest>>,
 ) {
-    for (e, icaf) in q.iter() {
+    for (e, icaf, opt_twstatus) in q.iter_mut() {
         // insert the timewarp components
-        let tw_status = TimewarpStatus::new(icaf.frame);
         let mut ch = ComponentHistory::<T>::with_capacity(
             timewarp_config.rollback_window as usize,
             icaf.frame,
@@ -137,37 +141,132 @@ pub(crate) fn unpack_icafs_and_maybe_rollback<
             ServerSnapshot::<T>::with_capacity(timewarp_config.rollback_window as usize * 60);
         ss.insert(icaf.frame, icaf.component.clone()).unwrap();
         // (this will be applied in the ApplyComponents set next)
-        commands
-            .entity(e)
-            .insert((tw_status, ch, ss))
-            .remove::<InsertComponentAtFrame<T>>();
 
-        // if frames match, we want it inserted this frame but not rolled back
-        if icaf.frame == **game_clock {
-            // info!("Inserting latecomer in trigger icafs: {e:?} {icaf:?}");
-            commands.entity(e).insert(icaf.component.clone());
-            continue;
-        }
-
-        if icaf.frame < **game_clock {
-            // trigger a rollback using the frame we just added authoritative values for
-            debug!(
-                "{e:?} trigger_rollback_when_icaf_added {icaf:?} requesting rb to {}",
-                icaf.frame + 1
-            );
-            rb_ev.send(RollbackRequest::resimulate_this_frame_onwards(
-                icaf.frame + 1,
-            ));
+        match icaf.frame.cmp(&game_clock.frame()) {
+            // if frames match, we want it inserted this frame but not rolled back
+            // since it has arrived just in time.
+            Ordering::Equal => {
+                if let Some(mut tw_status) = opt_twstatus {
+                    tw_status.set_snapped_at(icaf.frame);
+                } else {
+                    let mut tw_status = TimewarpStatus::new(icaf.frame);
+                    tw_status.set_snapped_at(icaf.frame);
+                    commands.entity(e).insert(tw_status);
+                }
+                commands
+                    .entity(e)
+                    .insert((ch, ss, icaf.component.clone()))
+                    .remove::<InsertComponentAtFrame<T>>();
+            }
+            // needs insertion in the past, so request a rollback.
+            Ordering::Less => {
+                debug!(
+                    "{e:?} Requesting rolllback when unpacking: {icaf:?} rb to {}",
+                    icaf.frame + 1
+                );
+                if let Some(mut tw_status) = opt_twstatus {
+                    tw_status.increment_rollback_triggers();
+                    tw_status.set_snapped_at(icaf.frame);
+                } else {
+                    let mut tw_status = TimewarpStatus::new(icaf.frame);
+                    tw_status.increment_rollback_triggers();
+                    tw_status.set_snapped_at(icaf.frame);
+                    commands.entity(e).insert(tw_status);
+                }
+                commands
+                    .entity(e)
+                    .insert((ch, ss))
+                    .remove::<InsertComponentAtFrame<T>>();
+                rb_ev.send(RollbackRequest::resimulate_this_frame_onwards(
+                    icaf.frame + 1,
+                ));
+            }
+            Ordering::Greater => {
+                // clients are supposed to be ahead, so we don't really expect to get updates for
+                // future frames. We'll store it but can't rollback to future.
+                commands
+                    .entity(e)
+                    .insert((ch, ss))
+                    .remove::<InsertComponentAtFrame<T>>();
+            }
         }
     }
 }
 
-pub(crate) fn request_rollback_for_blueprints<T: TimewarpComponent>(
-    q: Query<(Entity, &AssembleBlueprintAtFrame<T>), Added<AssembleBlueprintAtFrame<T>>>,
+/// Move ICAF data to the existing SS
+///
+/// if an ICAF was inserted, we may need to rollback.
+///
+pub(crate) fn unpack_icafs_into_tw_components<
+    T: TimewarpComponent,
+    const CORRECTION_LOGGING: bool,
+>(
+    mut q: Query<
+        (
+            Entity,
+            &InsertComponentAtFrame<T>,
+            &mut ServerSnapshot<T>,
+            &mut ComponentHistory<T>,
+            &mut TimewarpStatus,
+        ),
+        (Added<InsertComponentAtFrame<T>>, Without<NoRollback>),
+    >,
+    mut commands: Commands,
     game_clock: Res<GameClock>,
     mut rb_ev: ResMut<Events<RollbackRequest>>,
 ) {
-    for (entity, abaf) in q.iter() {
+    for (e, icaf, mut ss, mut ch, mut tw_status) in q.iter_mut() {
+        ch.insert(icaf.frame, icaf.component.clone(), &e)
+            .expect("Couldn't insert ICAF to CH");
+        ss.insert(icaf.frame, icaf.component.clone())
+            .expect("Couldn't insert ICAF to SS");
+
+        info!("Alive ranges for {icaf:?} = {:?}", ch.alive_ranges);
+
+        match icaf.frame.cmp(&game_clock.frame()) {
+            // if frames match, we want it inserted this frame but not rolled back
+            // since it has arrived just in time.
+            Ordering::Equal => {
+                commands
+                    .entity(e)
+                    .insert(icaf.component.clone())
+                    .remove::<InsertComponentAtFrame<T>>();
+            }
+            // needs insertion in the past, so request a rollback.
+            Ordering::Less => {
+                debug!(
+                    "{e:?} Requesting rolllback when unpacking: {icaf:?} rb to {}",
+                    icaf.frame + 1
+                );
+                tw_status.increment_rollback_triggers();
+                commands.entity(e).remove::<InsertComponentAtFrame<T>>();
+                rb_ev.send(RollbackRequest::resimulate_this_frame_onwards(
+                    icaf.frame + 1,
+                ));
+            }
+            Ordering::Greater => {
+                // clients are supposed to be ahead, so we don't really expect to get updates for
+                // future frames. We'll store it but can't rollback to future.
+                commands.entity(e).remove::<InsertComponentAtFrame<T>>();
+            }
+        }
+    }
+}
+
+pub(crate) fn request_rollback_for_blueprints<T: Component + std::fmt::Debug + Clone>(
+    mut q: Query<
+        (
+            Entity,
+            &AssembleBlueprintAtFrame<T>,
+            Option<&mut TimewarpStatus>,
+        ),
+        Added<AssembleBlueprintAtFrame<T>>,
+    >,
+    game_clock: Res<GameClock>,
+    mut rb_ev: ResMut<Events<RollbackRequest>>,
+    mut commands: Commands,
+) {
+    for (entity, abaf, opt_twstatus) in q.iter_mut() {
         let snap_frame = abaf.frame;
         // if frames == match, we want it inserted this frame but not rolled back.
         // don't do this here, the blueprint unpacking fn does this even during rollback.
@@ -176,6 +275,13 @@ pub(crate) fn request_rollback_for_blueprints<T: TimewarpComponent>(
             debug!(
                 "{game_clock:?} {entity:?} Requesting rollback for blueprint with snap_frame:{snap_frame} - {abaf:?}"
             );
+            if let Some(mut tws) = opt_twstatus {
+                tws.increment_rollback_triggers();
+            } else {
+                let mut tws = TimewarpStatus::new(snap_frame);
+                tws.increment_rollback_triggers();
+                commands.entity(entity).insert(tws);
+            }
             rb_ev.send(RollbackRequest::resimulate_this_frame_onwards(
                 snap_frame + 1,
             ));
