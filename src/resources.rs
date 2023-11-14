@@ -69,16 +69,16 @@ impl TimewarpConfig {
     }
 
     pub fn first_set(&self) -> Interned<dyn SystemSet> {
-        self.first_set.clone()
+        self.first_set
     }
     pub fn last_set(&self) -> Interned<dyn SystemSet> {
-        self.last_set.clone()
+        self.last_set
     }
     pub fn forced_rollback(&self) -> bool {
         self.force_rollback_always
     }
     pub fn schedule(&self) -> Interned<dyn ScheduleLabel> {
-        self.schedule.clone()
+        self.schedule
     }
     pub fn rollback_window(&self) -> FrameNumber {
         self.rollback_window
