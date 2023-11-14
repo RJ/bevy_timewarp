@@ -17,7 +17,7 @@ use std::time::Duration;
 pub(crate) fn rollback_initiated(
     mut game_clock: ResMut<GameClock>,
     mut rb: ResMut<Rollback>,
-    mut fx: ResMut<FixedTime>,
+    mut fx: ResMut<Time<Fixed>>,
     mut rb_stats: ResMut<RollbackStats>,
     timewarp_config: Res<TimewarpConfig>,
 ) {
@@ -33,7 +33,7 @@ pub(crate) fn rollback_initiated(
         );
     }
     // save original period for restoration after rollback completion
-    rb.original_period = Some(fx.period);
+    rb.original_period = Some(fx.timestep());
     rb_stats.num_rollbacks += 1;
     let depth = rb.range.end - rb.range.start + 1;
     // we wind clock back 1 past first resim frame, so we can load in data for the frame prior
@@ -42,7 +42,7 @@ pub(crate) fn rollback_initiated(
     info!("🛼 ROLLBACK RESOURCE ADDED (rb#{} depth={depth}), reseting game clock from {game_clock:?}-->{reset_game_clock_to} rb:{rb:?}", 
                 rb_stats.num_rollbacks);
     // make fixed-update ticks free, ie fast-forward the simulation at max speed
-    fx.period = Duration::ZERO;
+    fx.set_timestep(Duration::ZERO);
     // the start of the rb range is the frame with the newly added authoritative data.
     // since increment happens after the timewarp prefix sets, we set the clock to this value - 1,
     // knowing that it will immediately be incremented to the next frame we need to simulate.

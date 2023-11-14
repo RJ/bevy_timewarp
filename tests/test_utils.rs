@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use bevy::prelude::*;
 use bevy_timewarp::prelude::*;
 
@@ -31,8 +33,8 @@ pub fn setup_test_app() -> App {
         filter: "bevy_timewarp=trace".to_string(),
     });
     app.add_plugins(TimewarpPlugin::new(tw_config));
-    app.add_plugins(bevy::time::TimePlugin::default());
-    app.insert_resource(FixedTime::new(TIMESTEP));
+    app.add_plugins(bevy::time::TimePlugin);
+    app.insert_resource(Time::<Fixed>::from_duration(TIMESTEP));
     warn!("⏱️Instant::now= {:?}", bevy::utils::Instant::now());
     app
 }
@@ -40,9 +42,9 @@ pub fn setup_test_app() -> App {
 // Simulate that our fixed timestep has elapsed
 // and do 1 app.update
 pub fn tick(app: &mut App) {
-    let mut fxt = app.world.resource_mut::<FixedTime>();
-    let period = fxt.period;
-    fxt.tick(period);
+    let mut fxt = app.world.resource_mut::<Time<Fixed>>();
+    let period = fxt.timestep();
+    fxt.advance_by(period);
     app.update();
     let f = app.world.resource::<GameClock>().frame();
     info!("end of update for {f} ----------------------------------------------------------");
