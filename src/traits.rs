@@ -153,7 +153,7 @@ pub trait TimewarpEntityMutTraits {
     ) -> Result<InsertComponentResult, TimewarpError>;
 }
 
-impl TimewarpEntityMutTraits for EntityMut<'_> {
+impl TimewarpEntityMutTraits for EntityWorldMut<'_> {
     fn insert_component_at_frame<T: TimewarpComponent>(
         &mut self,
         frame: FrameNumber,

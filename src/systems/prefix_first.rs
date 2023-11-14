@@ -23,7 +23,7 @@ pub(crate) fn record_component_death<T: TimewarpComponent>(
     mut q: Query<&mut ComponentHistory<T>, Without<NoRollback>>,
     game_clock: Res<GameClock>,
 ) {
-    for entity in &mut removed {
+    for entity in removed.read() {
         if let Ok(mut ct) = q.get_mut(entity) {
             debug!(
                 "{entity:?} Component death @ {:?} {:?}",
