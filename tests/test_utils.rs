@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use bevy::{ecs::world, prelude::*};
+use bevy::prelude::*;
 use bevy_timewarp::prelude::*;
 
 /// Is arbitrarily large amount of time, such that no automatically run `FixedUpdate` schedules occur

@@ -42,8 +42,8 @@ pub(crate) fn rollback_initiated(
     info!("🛼 ROLLBACK RESOURCE ADDED (rb#{} depth={depth}), reseting game clock from {game_clock:?}-->{reset_game_clock_to} rb:{rb:?}", 
                 rb_stats.num_rollbacks);
     // make fixed-update ticks free, ie fast-forward the simulation at max speed
-		// ideally this is zero, but this function panics if we try to set it to zero
-		// as of bevy 0.12
+    // ideally this is zero, but this function panics if we try to set it to zero
+    // as of bevy 0.12
     fx.set_timestep(Duration::from_nanos(1));
     // the start of the rb range is the frame with the newly added authoritative data.
     // since increment happens after the timewarp prefix sets, we set the clock to this value - 1,

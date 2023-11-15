@@ -384,7 +384,7 @@ impl Plugin for TimewarpPlugin {
                 self.config.last_set().before(TimewarpPostfixSet::First),
             )
             // idk why this plugin inserts this resource here, since it is already
-						// inserted by bevy::log::TimePlugin
+            // inserted by bevy::log::TimePlugin
             .insert_resource(Time::<Fixed>::from_seconds(1.0 / 64.0))
             .insert_resource(GameClock::new());
     }

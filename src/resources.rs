@@ -1,7 +1,8 @@
 use crate::FrameNumber;
 use bevy::{
-    ecs::schedule::{ScheduleLabel, InternedScheduleLabel},
-    prelude::*, utils::intern::Interned,
+    ecs::schedule::{InternedScheduleLabel, ScheduleLabel},
+    prelude::*,
+    utils::intern::Interned,
 };
 use std::{ops::Range, time::Duration};
 
