@@ -91,7 +91,11 @@ impl TimewarpTraits for App {
         self.add_systems(
             schedule.clone(),
             (prefix_in_rollback::rebirth_components_during_rollback::<T>,)
-                .in_set(TimewarpPrefixSet::InRollback),
+                .in_set(TimewarpPrefixSet::InRollback)
+                // this after stops an edge case where [systems::prefix::check_for_rollback_completion] uses
+								// `commands.remove_resource::<Rollback>()` and `apply_deferred` is `.chain()`ed after it,
+								// removing the resource before this system runs
+                .before(systems::prefix_in_rollback::check_for_rollback_completion),
         );
         // this may result in a Rollback resource being inserted.
         self.add_systems(
