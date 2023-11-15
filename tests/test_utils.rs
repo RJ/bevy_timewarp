@@ -1,11 +1,9 @@
 use std::time::Duration;
 
-use bevy::prelude::*;
+use bevy::{ecs::world, prelude::*};
 use bevy_timewarp::prelude::*;
 
-// doesn't really matter what this is, since we simulate the time passing for testing.
-// however if it's low, say 16ms, and the test takes a while to execute, you could end up running
-// more ticks than you want. setting it to a high value avoids this.
+/// Is arbitrarily large amount of time, such that no automatically run `FixedUpdate` schedules occur
 pub const TIMESTEP: std::time::Duration = std::time::Duration::from_millis(100000);
 pub const TEST_ROLLBACK_WINDOW: FrameNumber = 10;
 
@@ -24,17 +22,33 @@ pub struct EntName {
 }
 
 pub fn setup_test_app() -> App {
+    let mut app = App::new();
+
     let tw_config = TimewarpConfig::new(TimewarpTestSets::GameLogic, TimewarpTestSets::GameLogic)
         .with_rollback_window(TEST_ROLLBACK_WINDOW)
         .with_schedule(FixedUpdate);
-    let mut app = App::new();
+
     app.add_plugins(bevy::log::LogPlugin {
         level: bevy::log::Level::TRACE,
         filter: "bevy_timewarp=trace".to_string(),
     });
     app.add_plugins(TimewarpPlugin::new(tw_config));
     app.add_plugins(bevy::time::TimePlugin);
+
+    // This ensures that the `FixedUpdate` schedule is run exactly once per frame
+    // by making Time<Virtual> (which is what determines when `FixedTime` is automatically run)
+    // increment *really slowly* and the `FixedUpdate` schedule run after a *very long*
+    // amount of time.
+    app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+        // Should be really small compared to [TIMESTEP]
+        Duration::from_nanos(1),
+    ));
+    app.add_systems(bevy::app::RunFixedUpdateLoop, |world: &mut World| {
+        // Manually runs the `FixedUpdate` schedule every `Update` cycle
+        world.run_schedule(FixedUpdate);
+    });
     app.insert_resource(Time::<Fixed>::from_duration(TIMESTEP));
+
     warn!("⏱️Instant::now= {:?}", bevy::utils::Instant::now());
     app
 }
@@ -42,9 +56,6 @@ pub fn setup_test_app() -> App {
 // Simulate that our fixed timestep has elapsed
 // and do 1 app.update
 pub fn tick(app: &mut App) {
-    let mut fxt = app.world.resource_mut::<Time<Fixed>>();
-    let period = fxt.timestep();
-    fxt.advance_by(period);
     app.update();
     let f = app.world.resource::<GameClock>().frame();
     info!("end of update for {f} ----------------------------------------------------------");
