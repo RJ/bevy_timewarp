@@ -1,7 +1,8 @@
 use crate::FrameNumber;
 use bevy::{
-    ecs::schedule::{BoxedSystemSet, ScheduleLabel},
+    ecs::schedule::{InternedScheduleLabel, ScheduleLabel},
     prelude::*,
+    utils::intern::Interned,
 };
 use std::{ops::Range, time::Duration};
 
@@ -28,11 +29,11 @@ pub struct TimewarpConfig {
     /// meant as a worst-case scenario for checking performance really.
     pub force_rollback_always: bool,
     /// schedule in which our `after_set` and rollback systems run, defaults to FixedUpdate
-    pub schedule: Box<dyn ScheduleLabel>,
+    pub schedule: InternedScheduleLabel,
     /// first set containing game logic
-    pub first_set: BoxedSystemSet,
+    pub first_set: Interned<dyn SystemSet>,
     /// last set containing game logic
-    pub last_set: BoxedSystemSet,
+    pub last_set: Interned<dyn SystemSet>,
 }
 
 impl TimewarpConfig {
@@ -43,16 +44,16 @@ impl TimewarpConfig {
     pub fn new(first_set: impl SystemSet, last_set: impl SystemSet) -> Self {
         Self {
             consolidation_strategy: RollbackConsolidationStrategy::Newest,
-            first_set: Box::new(first_set),
-            last_set: Box::new(last_set),
+            first_set: first_set.intern(),
+            last_set: last_set.intern(),
             // and defaults, override with builder fns:
             rollback_window: 30,
             force_rollback_always: false,
-            schedule: Box::new(FixedUpdate),
+            schedule: FixedUpdate.intern(),
         }
     }
     pub fn with_schedule(mut self, schedule: impl ScheduleLabel) -> Self {
-        self.schedule = Box::new(schedule);
+        self.schedule = schedule.intern();
         self
     }
     pub fn with_forced_rollback(mut self, enabled: bool) -> Self {
@@ -68,17 +69,17 @@ impl TimewarpConfig {
         self
     }
 
-    pub fn first_set(&self) -> BoxedSystemSet {
-        self.first_set.as_ref().dyn_clone()
+    pub fn first_set(&self) -> Interned<dyn SystemSet> {
+        self.first_set
     }
-    pub fn last_set(&self) -> BoxedSystemSet {
-        self.last_set.as_ref().dyn_clone()
+    pub fn last_set(&self) -> Interned<dyn SystemSet> {
+        self.last_set
     }
     pub fn forced_rollback(&self) -> bool {
         self.force_rollback_always
     }
-    pub fn schedule(&self) -> Box<dyn ScheduleLabel> {
-        self.schedule.dyn_clone()
+    pub fn schedule(&self) -> Interned<dyn ScheduleLabel> {
+        self.schedule
     }
     pub fn rollback_window(&self) -> FrameNumber {
         self.rollback_window

@@ -374,22 +374,18 @@ impl Plugin for TimewarpPlugin {
                 self.config.schedule(),
                 apply_deferred.after(TimewarpPostfixSet::Last),
             )
-            // BoxedSystemSet implements IntoSystemSetConfig, but not IntoSystemSetConfigs
-            // so for now, have to use the deprecated configure_set instead of configure_sets.
-            // assume this is because bevy's API is in transitional phase in this regards..
-            // https://github.com/bevyengine/bevy/pull/9247
-            // the specified first set must be after our TW prefix runs
-            .configure_set(
+            .configure_sets(
                 self.config.schedule(),
                 self.config.first_set().after(TimewarpPrefixSet::Last),
             )
             // the specified last set must be before the TW postfix runs.
-            .configure_set(
+            .configure_sets(
                 self.config.schedule(),
                 self.config.last_set().before(TimewarpPostfixSet::First),
             )
-            //
-            .insert_resource(FixedTime::new_from_secs(1.0 / 60.0))
+            // idk why this plugin inserts this resource here, since it is already
+            // inserted by bevy::log::TimePlugin
+            .insert_resource(Time::<Fixed>::from_seconds(1.0 / 64.0))
             .insert_resource(GameClock::new());
     }
 }

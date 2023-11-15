@@ -1,5 +1,5 @@
 use crate::systems::*;
-use bevy::{ecs::world::EntityMut, prelude::*};
+use bevy::prelude::*;
 
 use super::*;
 
@@ -48,7 +48,7 @@ impl TimewarpTraits for App {
         // this handles the case where we are rolling back because of a wrapped blueprint, and
         // we hit the exact frame to unwrap it like this:
         self.add_systems(
-            schedule.clone(),
+            schedule,
             //  this apply_deferred is a hack so Res<Rollback> is visible for debugging in this systeem
             (
                 apply_deferred,
@@ -57,7 +57,7 @@ impl TimewarpTraits for App {
                 .in_set(TimewarpPrefixSet::UnwrapBlueprints),
         );
         self.add_systems(
-            schedule.clone(),
+            schedule,
             prefix_not_in_rollback::request_rollback_for_blueprints::<T>
                 .before(prefix_not_in_rollback::consolidate_rollback_requests)
                 .in_set(TimewarpPrefixSet::NotInRollback),
@@ -77,25 +77,29 @@ impl TimewarpTraits for App {
         */
         if CORRECTION_LOGGING {
             self.add_systems(
-                schedule.clone(),
+                schedule,
                 prefix_first::enable_error_correction_for_new_component_histories::<T>
                     .in_set(TimewarpPrefixSet::First),
             );
         }
         self.add_systems(
-            schedule.clone(),
+            schedule,
             prefix_first::record_component_death::<T>
                 .run_if(not(resource_exists::<Rollback>()))
                 .in_set(TimewarpPrefixSet::First),
         );
         self.add_systems(
-            schedule.clone(),
+            schedule,
             (prefix_in_rollback::rebirth_components_during_rollback::<T>,)
-                .in_set(TimewarpPrefixSet::InRollback),
+                .in_set(TimewarpPrefixSet::InRollback)
+                // this after stops an edge case where [systems::prefix::check_for_rollback_completion] uses
+                // `commands.remove_resource::<Rollback>()` and `apply_deferred` is `.chain()`ed after it,
+                // removing the resource before this system runs
+                .before(systems::prefix_in_rollback::check_for_rollback_completion),
         );
         // this may result in a Rollback resource being inserted.
         self.add_systems(
-            schedule.clone(),
+            schedule,
             (
                 prefix_not_in_rollback::unpack_icafs_into_tw_components::<T, CORRECTION_LOGGING>,
                 prefix_not_in_rollback::unpack_icafs_adding_tw_components::<T, CORRECTION_LOGGING>,
@@ -105,7 +109,7 @@ impl TimewarpTraits for App {
                 .in_set(TimewarpPrefixSet::NotInRollback),
         );
         self.add_systems(
-            schedule.clone(),
+            schedule,
             (prefix_start_rollback::rollback_component::<T>,)
                 .in_set(TimewarpPrefixSet::StartRollback)
                 .after(prefix_start_rollback::rollback_initiated),
@@ -115,7 +119,7 @@ impl TimewarpTraits for App {
                Postfix Systems
         */
         self.add_systems(
-            schedule.clone(),
+            schedule,
             (
                 postfix_components::remove_components_from_despawning_entities::<T>,
                 postfix_components::record_component_history::<T>,
@@ -124,7 +128,7 @@ impl TimewarpTraits for App {
                 .in_set(TimewarpPostfixSet::Components),
         );
         self.add_systems(
-            schedule.clone(),
+            schedule,
             (
                 postfix_in_rollback::rekill_components_during_rollback::<T>,
                 postfix_in_rollback::clear_removed_components_queue::<T>,
@@ -153,7 +157,7 @@ pub trait TimewarpEntityMutTraits {
     ) -> Result<InsertComponentResult, TimewarpError>;
 }
 
-impl TimewarpEntityMutTraits for EntityMut<'_> {
+impl TimewarpEntityMutTraits for EntityWorldMut<'_> {
     fn insert_component_at_frame<T: TimewarpComponent>(
         &mut self,
         frame: FrameNumber,
